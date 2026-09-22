@@ -15,6 +15,13 @@ intents = discord.Intents.all()
 
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 
+core_extensions = [
+    'Source.Errors',
+    'Source.OwnerCommands',
+    'Source.Quicksync',
+    'Source.Status',
+]
+
 class MyBot(commands.Bot):
     def __init__(self) -> None:
         super().__init__(command_prefix='!b ', intents=intents)
@@ -37,7 +44,7 @@ class MyBot(commands.Bot):
                 if os.path.isdir(item_path) and item != '__pycache__':
                     if os.path.isfile(os.path.join(item_path, '__init__.py')):
                         try:
-                            await bot.load_extension(f'Source.Cogs.{item}')
+                            await self.load_extension(f'Source.Cogs.{item}')
                             print(f'Loaded package: {item}')
                         except Exception as e:
                             print(f"Failed to load package {item}: {e}")
@@ -46,7 +53,7 @@ class MyBot(commands.Bot):
                 elif os.path.isfile(item_path) and item.endswith('.py') and item != '__init__.py':
                     cog_name = item[:-3]
                     try:
-                        await bot.load_extension(f'Source.Cogs.{cog_name}')
+                        await self.load_extension(f'Source.Cogs.{cog_name}')
                         print(f'Loaded module: {cog_name}')
                     except Exception as e:
                         print(f"Failed to load module {cog_name}: {e}")

@@ -6,7 +6,6 @@ from discord.app_commands.commands import guilds
 from discord import app_commands
 import asyncio
 from dotenv import load_dotenv
-from .Utils.Cooldowns import handle_cooldown_error
 
 log = logging.getLogger(__name__)
 
@@ -63,9 +62,6 @@ class ErrorHandler(commands.Cog):
         if interaction.response.is_done():
             return
 
-        if isinstance(error, app_commands.CommandOnCooldown):
-            await handle_cooldown_error(interaction, error)
-            return
         elif isinstance(error, app_commands.MissingPermissions):
             title = "⛔ Missing Permissions"
             formatted_perms = [

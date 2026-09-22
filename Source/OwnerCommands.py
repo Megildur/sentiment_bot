@@ -35,7 +35,6 @@ def get_all_extensions() -> list[str]:
 class OwnerCog(commands.GroupCog, group_name='owner'):
     def __init__(self, bot) -> None:
         self.bot = bot
-        print("OwnerCog loaded")
 
     @app_commands.command(name='sync', description='Syncs the bot commands')
     async def sync(self, interaction: discord.Interaction, sync_type: Literal['Global', 'Guild']) -> None:

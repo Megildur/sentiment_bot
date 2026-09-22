@@ -1,3 +1,4 @@
+import os
 import discord
 import aiosqlite
 import asyncio
@@ -12,6 +13,7 @@ class DiceDatabase():
         self.bot = bot
 
     async def connect(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.db = await aiosqlite.connect(self.db_path)
         await self.db.execute("PRAGMA journal_mode=WAL;")
         await self.db.execute("PRAGMA synchronous=NORMAL;")

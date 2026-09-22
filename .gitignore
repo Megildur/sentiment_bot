@@ -1,0 +1,14 @@
+# Environments and Secrets
+venv/
+.env
+
+# Logs and Caches
+*.log
+__pycache__/
+*.pyc
+Data/
+
+# Editor Configs
+pyrightconfig.json
+
+

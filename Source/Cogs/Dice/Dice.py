@@ -5,7 +5,22 @@ from discord import app_commands
 from discord.app_commands import Choice
 from typing import Optional, Literal, Any
 from .Database import DiceDatabase
-from .Views import SetValuesModal, CreateCharButton, AttributeSetView
+from .Views import (
+    SetValuesModal,
+    CreateCharButton,
+    AttributeSetView,
+    NoticeView,
+    CharacterCardView,
+    WoundDieModal,
+    UnwoundDieModal,
+    LockDieModal,
+    UnlockDieModal,
+    SupportDieModal,
+    RollToDyeView,
+    RollToDoView,
+    RollToRecoverView,
+)
+from Source.Utils.Paginator import ButtonPaginator
 
 class Dice(commands.Cog):
     def __init__(self, bot):
@@ -19,13 +34,130 @@ class Dice(commands.Cog):
     async def cog_unload(self) -> None:
         await self.db_manager.close()
 
-    @app_commands.command(name="roll_to_dye")
-    async def roll_to_dye(self, interaction: discord.Interaction):
-        pass
+    async def _ensure_active_char(self, interaction: discord.Interaction) -> Optional[str]:
+        active_char = await self.db_manager.get_selected_char(interaction.user.id)
+        if not active_char:
+            view = NoticeView(
+                title="⚠️ No Active Character",
+                body="You do not have an active character selected.\n\nUse `/set_attributes` to create or select a character first!"
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(view=view, ephemeral=True)
+            else:
+                await interaction.response.send_message(view=view, ephemeral=True)
+            return None
+        return active_char
 
-    @app_commands.command(name="roll_to_do")
+    @app_commands.command(name="roll_to_dye", description="Roll all available attribute dice to defend or react")
+    async def roll_to_dye(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+        if not all_attrs:
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** does not have any attributes set. Use `/set_attributes` to configure them.")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
+        shared_out = await self.db_manager.get_active_shared_out_dice(interaction.user.id, active_char)
+        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked and a[0] not in shared_out]
+        display_name = await self.db_manager.get_char_display_name(active_char)
+
+        if not available:
+            view = NoticeView("⚠️ No Dice Available", f"No attribute dice are available for **{display_name}** to Roll to Dye.\n\nAll dice are wounded, locked, or currently lent out to allies.")
+            await interaction.response.send_message(view=view)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+        swing_color = swing[0] if swing else None
+        swing_val = swing[1] if swing else None
+
+        rolled_dice = []
+        for color, bonus in available:
+            custom_name = attr_names.get(color, "None")
+            if swing and color == swing_color:
+                rolled_dice.append({
+                    "color": color,
+                    "name": custom_name,
+                    "roll": swing_val,
+                    "bonus": bonus,
+                    "is_swing": True
+                })
+            else:
+                rolled_dice.append({
+                    "color": color,
+                    "name": custom_name,
+                    "roll": random.randint(1, 6),
+                    "bonus": bonus,
+                    "is_swing": False
+                })
+
+        swing_bonus = next((b for c, b in available if c == swing_color), 0) if swing_color else 0
+        swing_info = (swing_color, swing_val, swing_bonus) if swing_color and any(c == swing_color for c, _ in available) else None
+        pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
+
+        view = RollToDyeView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, pending_support, self.db_manager)
+        await interaction.response.send_message(view=view)
+
+    @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or wild 1d6 to affect the world")
     async def roll_to_do(self, interaction: discord.Interaction):
-        pass
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        display_name = await self.db_manager.get_char_display_name(active_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+
+        if swing:
+            color, val = swing
+            bonus = next((b for c, b in all_attrs if c == color), 0)
+            custom_name = attr_names.get(color, "None")
+            swing_info = (color, custom_name, val, bonus)
+            d20_roll = random.randint(1, 20)
+            d6_wild = 0
+        else:
+            swing_info = None
+            d20_roll = 0
+            d6_wild = random.randint(1, 6)
+
+        pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
+        view = RollToDoView(self.bot, interaction.user.id, active_char, display_name, swing_info, d20_roll, d6_wild, pending_support, self.db_manager)
+        await interaction.response.send_message(view=view)
+
+    @app_commands.command(name="roll_to_recover", description="Unlock all locked dice and roll unwounded dice to regain HP")
+    async def roll_to_recover(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        await self.db_manager.unlock_all_dice(interaction.user.id, active_char)
+        display_name = await self.db_manager.get_char_display_name(active_char)
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        unwounded = [a for a in all_attrs if a[0] not in wounded]
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+
+        rolled_dice = []
+        for color, bonus in unwounded:
+            custom_name = attr_names.get(color, "None")
+            rolled_dice.append({
+                "color": color,
+                "name": custom_name,
+                "roll": random.randint(1, 6),
+                "bonus": bonus
+            })
+
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+        swing_info = (swing[0], swing[1], next((b for c, b in all_attrs if c == swing[0]), 0)) if swing else None
+
+        view = RollToRecoverView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, self.db_manager)
+        await interaction.response.send_message(view=view)
 
     @app_commands.command(name="set_gm", description="choose who is the game gm")
     @app_commands.describe(user="user to set as gm")
@@ -40,8 +172,8 @@ class Dice(commands.Cog):
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
             await interaction.response.send_message(view=view)
         else:
-            view=discord.ui.LayoutView()
-            container=discord.ui.Container(
+            view = discord.ui.LayoutView()
+            container = discord.ui.Container(
                 discord.ui.TextDisplay(content="## **Create New Character!**"),
                 discord.ui.Separator(),
                 discord.ui.TextDisplay(content=
@@ -84,40 +216,254 @@ class Dice(commands.Cog):
             ephemeral=True
         )
 
-    @app_commands.command(name="roll_wild")
+    @app_commands.command(name="roll_wild", description="Roll a standalone 1d6")
     async def roll_wild(self, interaction: discord.Interaction):
         roll = random.randint(1, 6)
         view = discord.ui.LayoutView()
         active_char = await self.db_manager.get_selected_char(interaction.user.id)
+        display_name = await self.db_manager.get_char_display_name(active_char) if active_char else "No Character"
 
         container = discord.ui.Container(
-            discord.ui.TextDisplay(content="1d6 rolled!"),
+            discord.ui.TextDisplay(content="## 🎲 1d6 Rolled!"),
             discord.ui.Separator(),
-            discord.ui.TextDisplay(content=f"*{interaction.user.display_name}* rolled **{roll}** for *{active_char}*")
+            discord.ui.TextDisplay(content=f"*{interaction.user.display_name}* rolled **{roll}** for *{display_name}*"),
+            accent_color=discord.Color.random()
         )
         view.add_item(container)
         await interaction.response.send_message(view=view)
     
-    @app_commands.command(name="wound_die")
-    async def wound_die(self, interaction: discord.Interaction):
-        pass
-
-    @app_commands.command(name="unwound_die")
-    async def unwound_die(self, interaction: discord.Interaction):
-        pass   
-
-    @app_commands.command(name="character_card")
+    @app_commands.command(name="character_card", description="Display your character card and active status")
     async def character_card(self, interaction: discord.Interaction):
-        pass   
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
 
-    @app_commands.command(name="drop_swing")
-    async def drop_swing(self, interaction: discord.Interaction):
-        pass   
+        view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=active_char)
+        await interaction.response.send_message(view=view)
 
-    @app_commands.command(name="lock_die")
+    @app_commands.command(name="wound_die", description="Wound an attribute die")
+    async def wound_die(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+        if not all_attrs:
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        available = [a for a in all_attrs if a[0] not in wounded]
+        display_name = await self.db_manager.get_char_display_name(active_char)
+
+        if not available:
+            view = NoticeView("⚠️ All Dice Wounded", f"All attribute dice for **{display_name}** are already wounded. No more dice can be wounded.")
+            await interaction.response.send_message(view=view)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        modal = WoundDieModal(self.bot, self.db_manager, active_char, available, attr_names)
+        await interaction.response.send_modal(modal)
+
+    @app_commands.command(name="unwound_die", description="Heal / unwound a wounded attribute die")
+    async def unwound_die(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        display_name = await self.db_manager.get_char_display_name(active_char)
+
+        if not wounded:
+            view = NoticeView("ℹ️ No Wounded Dice", f"None of the dice for **{display_name}** are currently wounded.\n\nUse `/wound_die` if you need to wound one.", color=discord.Color.blue())
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        modal = UnwoundDieModal(self.bot, self.db_manager, active_char, wounded, attr_names)
+        await interaction.response.send_modal(modal)
+
+    @app_commands.command(name="lock_die", description="Lock an attribute die (e.g. for sprinting or igniting)")
     async def lock_die(self, interaction: discord.Interaction):
-        pass 
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
 
-    @app_commands.command(name="unlock_die")
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+        if not all_attrs:
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
+        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked]
+        display_name = await self.db_manager.get_char_display_name(active_char)
+
+        if not available:
+            view = NoticeView("⚠️ No Lockable Dice", f"No dice are available to lock for **{display_name}**.\n\nAll dice are either already locked or wounded.")
+            await interaction.response.send_message(view=view)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        modal = LockDieModal(self.bot, self.db_manager, active_char, available, attr_names)
+        await interaction.response.send_modal(modal)
+
+    @app_commands.command(name="unlock_die", description="Unlock a locked attribute die")
     async def unlock_die(self, interaction: discord.Interaction):
-        pass   
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
+        display_name = await self.db_manager.get_char_display_name(active_char)
+
+        if not locked:
+            view = NoticeView("ℹ️ No Locked Dice", f"There are no locked dice for **{display_name}**.\n\nUse `/lock_die` to lock one if needed.", color=discord.Color.blue())
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
+        modal = UnlockDieModal(self.bot, self.db_manager, active_char, locked, attr_names)
+        await interaction.response.send_modal(modal)
+
+    @app_commands.command(name="drop_swing", description="Drop your character's current active swing die")
+    async def drop_swing(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        display_name = await self.db_manager.get_char_display_name(active_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+
+        if not swing:
+            view = NoticeView("ℹ️ No Swing Set", f"**{display_name}** does not currently have an active swing set.", color=discord.Color.blue())
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        await self.db_manager.drop_swing(interaction.user.id, active_char)
+        view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.green())
+        await interaction.response.send_message(view=view)
+
+    @app_commands.command(name="support", description="Share an attribute die to support an ally's roll")
+    @app_commands.describe(user="The ally you want to support with a die")
+    async def support(self, interaction: discord.Interaction, user: discord.User | discord.Member):
+        if user.id == interaction.user.id:
+            view = NoticeView("❌ Invalid Ally", "You cannot send a support die to yourself!")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        sender_char = await self._ensure_active_char(interaction)
+        if not sender_char:
+            return
+
+        target_char = await self.db_manager.get_selected_char(user.id)
+        if not target_char:
+            view = NoticeView("⚠️ Ally Has No Character", f"<@{user.id}> does not have an active character selected.")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, sender_char)
+        wounded = await self.db_manager.get_wounded(interaction.user.id, sender_char)
+        locked = await self.db_manager.get_locked(interaction.user.id, sender_char)
+        shared_out = await self.db_manager.get_active_shared_out_dice(interaction.user.id, sender_char)
+        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked and a[0] not in shared_out]
+        sender_display = await self.db_manager.get_char_display_name(sender_char)
+
+        if not available:
+            view = NoticeView("⚠️ No Available Dice", f"You have no available dice to send as support for **{sender_display}**.\n\nAll dice are wounded, locked, or already supporting an ally.")
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
+        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, sender_char)
+        modal = SupportDieModal(self.bot, self.db_manager, sender_char, user, target_char, available, attr_names)
+        await interaction.response.send_modal(modal)
+
+    @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
+    async def help_command(self, interaction: discord.Interaction):
+        # Page 1: Character Management
+        page1 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## 📜 **Sentiment Guide: Characters & Setup**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**`/set_attributes`**\n"
+                "• Create a new character or open the character management dashboard.\n"
+                "• Add, edit, or delete attributes and set their bonuses (+0 to +9).\n"
+                "• Name your attributes (e.g. Red 'Passion', Blue 'Focus').\n"
+                "• Switch your active character or delete characters.\n\n"
+                "**`/change_active_character`**\n"
+                "• Quick slash command to switch your currently active character.\n\n"
+                "**`/character_card`**\n"
+                "• View your character sheet: active swing, attributes & bonuses, wounded dice, and locked dice.\n"
+                "• Includes an interactive switcher to view other characters you own."
+            ),
+            accent_color=discord.Color.blue()
+        )
+
+        # Page 2: Rolls
+        page2 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## 🎲 **Sentiment Guide: Core Rolls**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**`/roll_to_dye`**\n"
+                "• Reactive / defensive roll when things happen to your character (dodging, resisting magic, emotional endurance).\n"
+                "• Rolls a d6 for each unwounded and unlocked attribute.\n"
+                "• If a Swing is active, the swing die is not rerolled—its value and bonus are added.\n"
+                "• Use the **Set Swing** button on the roll to select a new active Swing.\n"
+                "• Use the **Apply Support Die** button to add an ally's support die to the roll.\n\n"
+                "**`/roll_to_do`**\n"
+                "• Action / proactive roll to affect the world (attacks, feats of skill, social maneuvers).\n"
+                "• If a Swing is set: rolls a **d20 + your Swing** (die value + attribute bonus). A natural 20 is a Critical (doubles damage/effect)!\n"
+                "• If no Swing is set: rolls a **1d6 Wild** roll with no bonuses.\n\n"
+                "**`/roll_to_recover`**\n"
+                "• Used during a Rest or after being Wounded to restore HP.\n"
+                "• Automatically unlocks all locked dice, then rolls unwounded dice + bonuses.\n"
+                "• Allows choosing a new Swing die from the recovery roll."
+            ),
+            accent_color=discord.Color.green()
+        )
+
+        # Page 3: Dice States & Support
+        page3 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## 🔒 **Sentiment Guide: Dice States & Support**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**`/wound_die` & `/unwound_die`**\n"
+                "• When HP reaches 0 or from extreme trauma, wound an attribute die.\n"
+                "• Wounding removes that die from future rolls until treated, and **automatically unlocks all locked dice**.\n"
+                "• Use `/unwound_die` when receiving healing or resting between sessions.\n\n"
+                "**`/lock_die` & `/unlock_die`**\n"
+                "• Temporarily lock an attribute die for powerful actions (Sprint, Push, Block, Tag a Prop).\n"
+                "• Locking your Swing drops it. All locked dice unlock at the start of your turn or during recovery.\n\n"
+                "**`/drop_swing`**\n"
+                "• Clear your active swing to become colorless.\n\n"
+                "**`/support`**\n"
+                "• Share an attribute die with an ally. It provides an extra **+1d6** button on their next roll.\n"
+                "• Once used by your ally, the die automatically returns to you **locked**."
+            ),
+            accent_color=discord.Color.orange()
+        )
+
+        # Page 4: GM & Situational Rules
+        page4 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## ⚖️ **Sentiment Guide: GM & Combat Reference**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**`/set_gm`**\n"
+                "• Set or transfer the designated Game Master for the server.\n\n"
+                "**Combat & Clashing**\n"
+                "• If you Roll to Do against an opponent dyed the same color as your Swing, a **Clash** occurs!\n"
+                "• Both sides Roll to Do. If the attacker wins, damage is doubled; if the defender wins, they immediately get a free reprise action!\n\n"
+                "**Conflict Flow**\n"
+                "• Each turn in a Conflict gives 1 Action and 1 Move. You can lock dice to Sprint for extra moves."
+            ),
+            accent_color=discord.Color.purple()
+        )
+
+        paginator = ButtonPaginator.create_standard_paginator(
+            [page1, page2, page3, page4],
+            author_id=interaction.user.id,
+            timeout=300.0
+        )
+        await paginator.start(interaction)

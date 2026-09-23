@@ -13,7 +13,9 @@ class DiceDatabase():
         self.bot = bot
 
     async def connect(self):
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        dir_name = os.path.dirname(self.db_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         self.db = await aiosqlite.connect(self.db_path)
         await self.db.execute("PRAGMA journal_mode=WAL;")
         await self.db.execute("PRAGMA synchronous=NORMAL;")
@@ -44,6 +46,17 @@ class DiceDatabase():
             )
         ''')
         await self.db.execute('''
+            CREATE TABLE IF NOT EXISTS support_die (
+                share_support_user_id INTEGER,
+                recieve_support_user_id INTEGER,
+                share_support_char_name TEXT,
+                recieve_support_char_name TEXT,
+                attribute TEXT,
+                attribute_name TEXT,
+                PRIMARY KEY (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute)
+            )
+        ''')
+        await self.db.execute('''
             CREATE TABLE IF NOT EXISTS selected_char (
                 user_id INTEGER PRIMARY KEY,
                 char_name TEXT
@@ -63,7 +76,7 @@ class DiceDatabase():
             )
         ''')
         await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS stats (
+            CREATE TABLE IF NOT EXISTS swing (
                 user_id INTEGER,
                 char_name TEXT,
                 swing TEXT,
@@ -194,7 +207,17 @@ class DiceDatabase():
     async def completely_delete_character(self, user_id: int, char_name: str):
         async with self.db_lock:
             await self.db.execute("DELETE FROM attributes WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute("DELETE FROM attributes_names WHERE user_id = ? AND char_name = ?", (user_id, char_name))
             await self.db.execute("DELETE FROM selected_char WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute("DELETE FROM swing WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute("DELETE FROM wounded WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute("DELETE FROM locked WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute(
+                "DELETE FROM support_die WHERE (share_support_user_id = ? AND share_support_char_name = ?) OR (recieve_support_user_id = ? AND recieve_support_char_name = ?)",
+                (user_id, char_name, user_id, char_name)
+            )
+            clean_name = char_name.replace(" (NPC)", "").strip()
+            await self.db.execute("DELETE FROM npc WHERE char_name = ? OR char_name = ?", (char_name, clean_name))
             await self.db.commit()
 
     async def set_attribute_name(self, interaction: discord.Interaction, char_name: str, attribute: str, name: str):
@@ -214,4 +237,204 @@ class DiceDatabase():
             result = await cursor.fetchall()
             
             return {row[0]: row[1] for row in result} if result else {}
+
+    # --- GM & NPC Helpers ---
+    async def get_gm(self) -> Optional[int]:
+        async with self.db_lock:
+            cursor = await self.db.execute("SELECT user_id FROM gm WHERE value = 1")
+            res = await cursor.fetchone()
+            return res[0] if res else None
+
+    async def is_gm(self, user_id: int) -> bool:
+        gm_id = await self.get_gm()
+        return gm_id == user_id
+
+    async def is_npc(self, char_name: str) -> bool:
+        if not char_name:
+            return False
+        clean_name = char_name.replace(" (NPC)", "").strip()
+        async with self.db_lock:
+            cursor = await self.db.execute("SELECT 1 FROM npc WHERE value = 1 AND (char_name = ? OR char_name = ?)", (char_name, clean_name))
+            res = await cursor.fetchone()
+            return res is not None
+
+    async def toggle_npc(self, char_name: str) -> bool:
+        clean_name = char_name.replace(" (NPC)", "").strip()
+        is_currently_npc = await self.is_npc(clean_name)
+        async with self.db_lock:
+            if is_currently_npc:
+                await self.db.execute("DELETE FROM npc WHERE char_name = ? OR char_name = ?", (clean_name, f"{clean_name} (NPC)"))
+                await self.db.commit()
+                return False
+            else:
+                await self.db.execute("INSERT OR REPLACE INTO npc (value, char_name) VALUES (1, ?)", (clean_name,))
+                await self.db.commit()
+                return True
+
+    async def get_char_display_name(self, char_name: str) -> str:
+        if not char_name:
+            return ""
+        clean_name = char_name.replace(" (NPC)", "").strip()
+        if await self.is_npc(clean_name):
+            return f"{clean_name} (NPC)"
+        return clean_name
+
+    # --- Attributes ---
+    async def get_character_attributes(self, user_id: int, char_name: str) -> list[tuple[str, int]]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT attribute, attribute_value FROM attributes WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            return await cursor.fetchall()
+
+    # --- Swing ---
+    async def get_swing(self, user_id: int, char_name: str) -> Optional[tuple[str, int]]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT swing, swing_value FROM swing WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            res = await cursor.fetchone()
+            return (res[0], res[1]) if res else None
+
+    async def set_swing(self, user_id: int, char_name: str, attribute: str, swing_value: int):
+        async with self.db_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO swing (user_id, char_name, swing, swing_value) VALUES (?, ?, ?, ?)",
+                (user_id, char_name, attribute, swing_value)
+            )
+            await self.db.commit()
+
+    async def drop_swing(self, user_id: int, char_name: str) -> bool:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "DELETE FROM swing WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
+
+    # --- Wounded ---
+    async def get_wounded(self, user_id: int, char_name: str) -> list[str]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT wounded FROM wounded WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows] if rows else []
+
+    async def wound_die(self, user_id: int, char_name: str, attribute: str):
+        async with self.db_lock:
+            # 1. Unlock all locked dice (Sentiment rule: When you are Wounded, immediately Unlock all dice)
+            await self.db.execute("DELETE FROM locked WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            # 2. If the wounded die was swing, drop swing
+            await self.db.execute("DELETE FROM swing WHERE user_id = ? AND char_name = ? AND swing = ?", (user_id, char_name, attribute))
+            # 3. Add to wounded table
+            await self.db.execute(
+                "INSERT OR REPLACE INTO wounded (user_id, char_name, wounded) VALUES (?, ?, ?)",
+                (user_id, char_name, attribute)
+            )
+            await self.db.commit()
+
+    async def unwound_die(self, user_id: int, char_name: str, attribute: str) -> bool:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "DELETE FROM wounded WHERE user_id = ? AND char_name = ? AND wounded = ?",
+                (user_id, char_name, attribute)
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
+
+    # --- Locked ---
+    async def get_locked(self, user_id: int, char_name: str) -> list[str]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT locked FROM locked WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows] if rows else []
+
+    async def lock_die(self, user_id: int, char_name: str, attribute: str):
+        async with self.db_lock:
+            # If the die being locked is your swing it is removed "dropped" as your swing
+            await self.db.execute("DELETE FROM swing WHERE user_id = ? AND char_name = ? AND swing = ?", (user_id, char_name, attribute))
+            await self.db.execute(
+                "INSERT OR REPLACE INTO locked (user_id, char_name, locked) VALUES (?, ?, ?)",
+                (user_id, char_name, attribute)
+            )
+            await self.db.commit()
+
+    async def unlock_die(self, user_id: int, char_name: str, attribute: str) -> bool:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "DELETE FROM locked WHERE user_id = ? AND char_name = ? AND locked = ?",
+                (user_id, char_name, attribute)
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
+
+    async def unlock_all_dice(self, user_id: int, char_name: str):
+        async with self.db_lock:
+            await self.db.execute(
+                "DELETE FROM locked WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            await self.db.commit()
+
+    # --- Support Die ---
+    async def add_support_die(self, share_user_id: int, share_char: str, recv_user_id: int, recv_char: str, attribute: str, attribute_name: str):
+        async with self.db_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO support_die (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute, attribute_name) VALUES (?, ?, ?, ?, ?, ?)",
+                (share_user_id, recv_user_id, share_char, recv_char, attribute, attribute_name)
+            )
+            await self.db.commit()
+
+    async def get_pending_support_dice(self, recv_user_id: int, recv_char: str) -> list[dict]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT share_support_user_id, share_support_char_name, attribute, attribute_name FROM support_die WHERE recieve_support_user_id = ? AND recieve_support_char_name = ?",
+                (recv_user_id, recv_char)
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "share_user_id": r[0],
+                    "share_char_name": r[1],
+                    "attribute": r[2],
+                    "attribute_name": r[3]
+                }
+                for r in rows
+            ]
+
+    async def get_active_shared_out_dice(self, share_user_id: int, share_char: str) -> list[str]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT attribute FROM support_die WHERE share_support_user_id = ? AND share_support_char_name = ?",
+                (share_user_id, share_char)
+            )
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows] if rows else []
+
+    async def consume_support_die(self, share_user_id: int, share_char: str, recv_user_id: int, recv_char: str, attribute: str):
+        async with self.db_lock:
+            # 1. Remove from support_die
+            await self.db.execute(
+                "DELETE FROM support_die WHERE share_support_user_id = ? AND recieve_support_user_id = ? AND share_support_char_name = ? AND recieve_support_char_name = ? AND attribute = ?",
+                (share_user_id, recv_user_id, share_char, recv_char, attribute)
+            )
+            # 2. Return to donor locked! (insert into locked)
+            await self.db.execute(
+                "INSERT OR REPLACE INTO locked (user_id, char_name, locked) VALUES (?, ?, ?)",
+                (share_user_id, share_char, attribute)
+            )
+            # 3. If it was donor's swing, drop swing
+            await self.db.execute(
+                "DELETE FROM swing WHERE user_id = ? AND char_name = ? AND swing = ?",
+                (share_user_id, share_char, attribute)
+            )
+            await self.db.commit()
 

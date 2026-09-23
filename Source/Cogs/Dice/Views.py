@@ -287,8 +287,12 @@ class EditAttributeSelect(discord.ui.Select):
             discord.SelectOption(label=f"Edit {color}", description=f"Current bonus: +{bonus}", value=color, emoji=COLOR_EMOJIS.get(color, "⚪"))
             for color, bonus in self.result_dict.items()
         ]
+        disabled = False
+        if not options:
+            options = [discord.SelectOption(label="No attributes available", value="_none_")]
+            disabled = True
             
-        super().__init__(placeholder="Select an attribute to edit...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Select an attribute to edit...", min_values=1, max_values=1, options=options, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         selected_color = self.values[0]
@@ -394,7 +398,12 @@ class DeleteSingleAttributeModal(discord.ui.Modal, title="Delete Attribute"):
     async def on_submit(self, interaction: discord.Interaction):
         await self.db_manager.delete_attribute(interaction, self.char_name, self.color_select.values[0])
         
-        view = await AttributeSetView.build(self.bot, interaction, self.db_manager, self.char_name, is_new=True)
+        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
+        if not all_chars:
+            await self.db_manager.completely_delete_character(interaction.user.id, self.char_name)
+            view = NoCharactersLeftView(self.bot, self.db_manager, deleted_char=self.char_name)
+        else:
+            view = await AttributeSetView.build(self.bot, interaction, self.db_manager, self.char_name, is_new=True)
 
         try:
             await interaction.response.edit_message(view=view)
@@ -419,8 +428,12 @@ class ChangeCharSelect(discord.ui.Select):
             discord.SelectOption(label=c, value=c, default=(c == active_char))
             for c in all_chars[:25]
         ]
+        disabled = False
+        if not options:
+            options = [discord.SelectOption(label="No characters available", value="_none_")]
+            disabled = True
         
-        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         new_active = self.values[0]
@@ -436,12 +449,35 @@ class DeleteCharSelect(discord.ui.Select):
         self.active_char = active_char
         
         options = [discord.SelectOption(label=c, value=c) for c in all_chars[:25]]
-        super().__init__(placeholder="Delete a character permanently...", min_values=1, max_values=1, options=options)
+        disabled = False
+        if not options:
+            options = [discord.SelectOption(label="No characters available", value="_none_")]
+            disabled = True
+        super().__init__(placeholder="Delete a character permanently...", min_values=1, max_values=1, options=options, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         char_to_delete = self.values[0]
         view = ConfirmDeleteCharView(self.bot, self.db_manager, char_to_delete, self.active_char)
         await interaction.response.edit_message(view=view)
+
+class NoCharactersLeftView(discord.ui.LayoutView):
+    def __init__(self, bot, db_manager, deleted_char: str = None):
+        super().__init__(timeout=300)
+        deleted_msg = f"**{deleted_char}** was permanently deleted.\n\n" if deleted_char else ""
+        container = discord.ui.Container(
+            discord.ui.TextDisplay(content="## **⚠️ No Characters Remaining**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(
+                content=f"{deleted_msg}You have no characters left. Use `/set_attributes` or press the button below to create a new character!"
+            ),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.ActionRow(
+                CreateCharButton(bot, db_manager),
+                CloseMenuButton()
+            ),
+            accent_color=discord.Color.yellow()
+        )
+        self.add_item(container)
 
 class CancelDeleteButton(discord.ui.Button):
     def __init__(self, bot, db_manager, active_char: str):
@@ -451,8 +487,15 @@ class CancelDeleteButton(discord.ui.Button):
         self.active_char = active_char
 
     async def callback(self, interaction: discord.Interaction):
-        view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=self.active_char)
-        await interaction.response.edit_message(content=None, view=view)
+        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
+        if not all_chars:
+            view = NoCharactersLeftView(self.bot, self.db_manager)
+            await interaction.response.edit_message(view=view)
+            return
+
+        target_char = self.active_char if self.active_char in all_chars else all_chars[0]
+        view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=target_char)
+        await interaction.response.edit_message(view=view)
 
 class ConfirmDeleteButton(discord.ui.Button):
     def __init__(self, bot, db_manager, char_to_delete: str, active_char: str):
@@ -466,18 +509,15 @@ class ConfirmDeleteButton(discord.ui.Button):
         await self.db_manager.completely_delete_character(interaction.user.id, self.char_to_delete)
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
-        if self.char_to_delete == self.active_char:
-            if not all_chars:
-                await interaction.response.edit_message(
-                    content="⚠️ You have no characters left. Use `/set_attributes` to create a new one.", 
-                    view=None
-                )
-            else:
-                view = SelectNewActiveCharView(self.bot, self.db_manager, all_chars, deleted_char=self.char_to_delete)
-                await interaction.response.edit_message(content=None, view=view)
+        if not all_chars:
+            view = NoCharactersLeftView(self.bot, self.db_manager, deleted_char=self.char_to_delete)
+            await interaction.response.edit_message(view=view)
+        elif self.char_to_delete == self.active_char or self.active_char not in all_chars:
+            view = SelectNewActiveCharView(self.bot, self.db_manager, all_chars, deleted_char=self.char_to_delete)
+            await interaction.response.edit_message(view=view)
         else:
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=self.active_char)
-            await interaction.response.edit_message(content=None, view=view)
+            await interaction.response.edit_message(view=view)
 
 class ConfirmDeleteCharView(discord.ui.LayoutView):
     def __init__(self, bot, db_manager, char_to_delete: str, active_char: str):
@@ -492,7 +532,8 @@ class ConfirmDeleteCharView(discord.ui.LayoutView):
             discord.ui.ActionRow(
                 CancelDeleteButton(bot, db_manager, active_char),
                 ConfirmDeleteButton(bot, db_manager, char_to_delete, active_char)
-            )
+            ),
+            accent_color=discord.Color.red()
         )
         self.add_item(container)
 
@@ -508,7 +549,7 @@ class NewActiveCharSelect(discord.ui.Select):
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
         
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=new_active)
-        await interaction.response.edit_message(content=None, view=view)
+        await interaction.response.edit_message(view=view)
 
 class SelectNewActiveCharView(discord.ui.LayoutView):
     def __init__(self, bot, db_manager, all_chars: list, deleted_char: str = None):
@@ -638,7 +679,11 @@ class ChangeCardCharSelect(discord.ui.Select):
             discord.SelectOption(label=c, value=c, default=(c == active_char))
             for c in all_chars[:25]
         ]
-        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options)
+        disabled = False
+        if not options:
+            options = [discord.SelectOption(label="No characters available", value="_none_")]
+            disabled = True
+        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         new_active = self.values[0]
@@ -1117,6 +1162,7 @@ class RollToDoView(discord.ui.LayoutView):
     def render_view(self):
         self.clear_items()
 
+        crit_text = " 💥 **CRITICAL HIT!**" if self.d20_roll == 20 else ""
         if self.swing_info:
             color, custom_name, swing_val, bonus = self.swing_info
             emoji = COLOR_EMOJIS.get(color, "⚪")
@@ -1124,7 +1170,6 @@ class RollToDoView(discord.ui.LayoutView):
             base_total = self.d20_roll + swing_total
             total = base_total + sum(s['roll'] for s in self.support_rolls)
 
-            crit_text = " 💥 **CRITICAL HIT!**" if self.d20_roll == 20 else ""
             lines = [
                 f"*{self.display_name}* rolled for {emoji} **{color}** (*{custom_name}*)\n",
                 f"• **d20 Die Roll:** **{self.d20_roll}**{crit_text}",
@@ -1132,11 +1177,12 @@ class RollToDoView(discord.ui.LayoutView):
             ]
             accent_color = COLOR_DISCORD_COLORS.get(color, discord.Color.random())
         else:
-            base_total = self.d6_wild
+            base_total = self.d20_roll + self.d6_wild
             total = base_total + sum(s['roll'] for s in self.support_rolls)
             lines = [
                 f"*{self.display_name}* rolled to do (Wild / Colorless)\n",
-                f"• **1d6 Wild Roll:** **{self.d6_wild}**"
+                f"• **d20 Die Roll:** **{self.d20_roll}**{crit_text}",
+                f"• **1d6 Wild Roll:** **+{self.d6_wild}**"
             ]
             accent_color = discord.Color.random()
 

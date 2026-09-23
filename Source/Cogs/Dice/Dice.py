@@ -36,16 +36,24 @@ class Dice(commands.Cog):
 
     async def _ensure_active_char(self, interaction: discord.Interaction) -> Optional[str]:
         active_char = await self.db_manager.get_selected_char(interaction.user.id)
-        if not active_char:
+        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
+        if not all_chars:
+            if active_char:
+                await self.db_manager.completely_delete_character(interaction.user.id, active_char)
             view = NoticeView(
                 title="⚠️ No Active Character",
-                body="You do not have an active character selected.\n\nUse `/set_attributes` to create or select a character first!"
+                body="You do not have any characters created.\n\nUse `/set_attributes` to create a character first!"
             )
             if interaction.response.is_done():
                 await interaction.followup.send(view=view, ephemeral=True)
             else:
                 await interaction.response.send_message(view=view, ephemeral=True)
             return None
+
+        if not active_char or active_char not in all_chars:
+            active_char = all_chars[0]
+            await self.db_manager.set_selected_char(interaction.user.id, active_char)
+
         return active_char
 
     @app_commands.command(name="roll_to_dye", description="Roll all available attribute dice to defend or react")
@@ -103,7 +111,7 @@ class Dice(commands.Cog):
         view = RollToDyeView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, pending_support, self.db_manager)
         await interaction.response.send_message(view=view)
 
-    @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or wild 1d6 to affect the world")
+    @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or 1d6 Wild die to affect the world")
     async def roll_to_do(self, interaction: discord.Interaction):
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
@@ -114,16 +122,15 @@ class Dice(commands.Cog):
         attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
         all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
 
+        d20_roll = random.randint(1, 20)
         if swing:
             color, val = swing
             bonus = next((b for c, b in all_attrs if c == color), 0)
             custom_name = attr_names.get(color, "None")
             swing_info = (color, custom_name, val, bonus)
-            d20_roll = random.randint(1, 20)
             d6_wild = 0
         else:
             swing_info = None
-            d20_roll = 0
             d6_wild = random.randint(1, 6)
 
         pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
@@ -167,11 +174,17 @@ class Dice(commands.Cog):
     @app_commands.command(name="set_attributes", description="View or set your character attributes")
     async def set_attributes_command(self, interaction: discord.Interaction):
         active_char = await self.db_manager.get_selected_char(interaction.user.id)
+        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
-        if active_char:
+        if all_chars:
+            if not active_char or active_char not in all_chars:
+                active_char = all_chars[0]
+                await self.db_manager.set_selected_char(interaction.user.id, active_char)
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
             await interaction.response.send_message(view=view)
         else:
+            if active_char:
+                await self.db_manager.completely_delete_character(interaction.user.id, active_char)
             view = discord.ui.LayoutView()
             container = discord.ui.Container(
                 discord.ui.TextDisplay(content="## **Create New Character!**"),
@@ -415,7 +428,7 @@ class Dice(commands.Cog):
                 "**`/roll_to_do`**\n"
                 "• Action / proactive roll to affect the world (attacks, feats of skill, social maneuvers).\n"
                 "• If a Swing is set: rolls a **d20 + your Swing** (die value + attribute bonus). A natural 20 is a Critical (doubles damage/effect)!\n"
-                "• If no Swing is set: rolls a **1d6 Wild** roll with no bonuses.\n\n"
+                "• If no Swing is set: rolls a **1d20 + 1d6 Wild** roll with no bonuses.\n\n"
                 "**`/roll_to_recover`**\n"
                 "• Used during a Rest or after being Wounded to restore HP.\n"
                 "• Automatically unlocks all locked dice, then rolls unwounded dice + bonuses.\n"

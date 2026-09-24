@@ -11,6 +11,8 @@ from .Views import (
     AttributeSetView,
     NoticeView,
     CharacterCardView,
+    ManageMaxHPView,
+    HPActionResultView,
     WoundDieModal,
     UnwoundDieModal,
     LockDieModal,
@@ -19,10 +21,13 @@ from .Views import (
     RollToDyeView,
     RollToDoView,
     RollToRecoverView,
+    get_swing_accent_color,
 )
 from Source.Utils.Paginator import ButtonPaginator
 
 class Dice(commands.Cog):
+    hp = app_commands.Group(name="hp", description="Manage your active character's HP (heal, damage, max HP)")
+
     def __init__(self, bot):
         super().__init__()
         self.bot = bot
@@ -33,6 +38,12 @@ class Dice(commands.Cog):
 
     async def cog_unload(self) -> None:
         await self.db_manager.close()
+
+    async def _get_char_color(self, user_id: int, char_name: Optional[str] = None) -> discord.Color:
+        if not char_name:
+            return discord.Color.random()
+        swing = await self.db_manager.get_swing(user_id, char_name)
+        return get_swing_accent_color(swing)
 
     async def _ensure_active_char(self, interaction: discord.Interaction) -> Optional[str]:
         active_char = await self.db_manager.get_selected_char(interaction.user.id)
@@ -62,9 +73,10 @@ class Dice(commands.Cog):
         if not active_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, active_char)
         all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
         if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** does not have any attributes set. Use `/set_attributes` to configure them.")
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** does not have any attributes set. Use `/set_attributes` to configure them.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -75,7 +87,7 @@ class Dice(commands.Cog):
         display_name = await self.db_manager.get_char_display_name(active_char)
 
         if not available:
-            view = NoticeView("⚠️ No Dice Available", f"No attribute dice are available for **{display_name}** to Roll to Dye.\n\nAll dice are wounded, locked, or currently lent out to allies.")
+            view = NoticeView("⚠️ No Dice Available", f"No attribute dice are available for **{display_name}** to Roll to Dye.\n\nAll dice are wounded, locked, or currently lent out to allies.", color=char_color)
             await interaction.response.send_message(view=view)
             return
 
@@ -151,19 +163,40 @@ class Dice(commands.Cog):
         attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
 
         rolled_dice = []
+        total_roll = 0
         for color, bonus in unwounded:
             custom_name = attr_names.get(color, "None")
+            die_roll = random.randint(1, 6)
+            total_roll += die_roll + bonus
             rolled_dice.append({
                 "color": color,
                 "name": custom_name,
-                "roll": random.randint(1, 6),
+                "roll": die_roll,
                 "bonus": bonus
             })
+
+        old_hp, new_hp, max_hp = await self.db_manager.recover_hp(
+            interaction.user.id,
+            active_char,
+            total_roll,
+            has_unwounded_dice=bool(rolled_dice)
+        )
 
         swing = await self.db_manager.get_swing(interaction.user.id, active_char)
         swing_info = (swing[0], swing[1], next((b for c, b in all_attrs if c == swing[0]), 0)) if swing else None
 
-        view = RollToRecoverView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, self.db_manager)
+        view = RollToRecoverView(
+            self.bot,
+            interaction.user.id,
+            active_char,
+            display_name,
+            rolled_dice,
+            swing_info,
+            self.db_manager,
+            old_hp=old_hp,
+            new_hp=new_hp,
+            max_hp=max_hp
+        )
         await interaction.response.send_message(view=view)
 
     @app_commands.command(name="set_gm", description="choose who is the game gm")
@@ -216,18 +249,14 @@ class Dice(commands.Cog):
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
         if characters not in all_chars:
-            await interaction.response.send_message(
-                f"❌ You do not own a character named **{characters}**.", 
-                ephemeral=True
-            )
+            view = NoticeView("❌ Character Not Found", f"You do not own a character named **{characters}**.")
+            await interaction.response.send_message(view=view, ephemeral=True)
             return
             
         await self.db_manager.set_selected_char(interaction.user.id, characters)
-        
-        await interaction.response.send_message(
-            f"✅ Your active character has been changed to **{characters}**.", 
-            ephemeral=True
-        )
+        char_color = await self._get_char_color(interaction.user.id, characters)
+        view = NoticeView("✅ Active Character Changed", f"Your active character has been changed to **{characters}**.", color=char_color)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     @app_commands.command(name="roll_wild", description="Roll a standalone 1d6")
     async def roll_wild(self, interaction: discord.Interaction):
@@ -260,9 +289,10 @@ class Dice(commands.Cog):
         if not active_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, active_char)
         all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
         if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.")
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -271,7 +301,7 @@ class Dice(commands.Cog):
         display_name = await self.db_manager.get_char_display_name(active_char)
 
         if not available:
-            view = NoticeView("⚠️ All Dice Wounded", f"All attribute dice for **{display_name}** are already wounded. No more dice can be wounded.")
+            view = NoticeView("⚠️ All Dice Wounded", f"All attribute dice for **{display_name}** are already wounded. No more dice can be wounded.", color=char_color)
             await interaction.response.send_message(view=view)
             return
 
@@ -285,11 +315,12 @@ class Dice(commands.Cog):
         if not active_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, active_char)
         wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
         display_name = await self.db_manager.get_char_display_name(active_char)
 
         if not wounded:
-            view = NoticeView("ℹ️ No Wounded Dice", f"None of the dice for **{display_name}** are currently wounded.\n\nUse `/wound_die` if you need to wound one.", color=discord.Color.blue())
+            view = NoticeView("ℹ️ No Wounded Dice", f"None of the dice for **{display_name}** are currently wounded.\n\nUse `/wound_die` if you need to wound one.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -303,9 +334,10 @@ class Dice(commands.Cog):
         if not active_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, active_char)
         all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
         if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.")
+            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -315,7 +347,7 @@ class Dice(commands.Cog):
         display_name = await self.db_manager.get_char_display_name(active_char)
 
         if not available:
-            view = NoticeView("⚠️ No Lockable Dice", f"No dice are available to lock for **{display_name}**.\n\nAll dice are either already locked or wounded.")
+            view = NoticeView("⚠️ No Lockable Dice", f"No dice are available to lock for **{display_name}**.\n\nAll dice are either already locked or wounded.", color=char_color)
             await interaction.response.send_message(view=view)
             return
 
@@ -329,11 +361,12 @@ class Dice(commands.Cog):
         if not active_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, active_char)
         locked = await self.db_manager.get_locked(interaction.user.id, active_char)
         display_name = await self.db_manager.get_char_display_name(active_char)
 
         if not locked:
-            view = NoticeView("ℹ️ No Locked Dice", f"There are no locked dice for **{display_name}**.\n\nUse `/lock_die` to lock one if needed.", color=discord.Color.blue())
+            view = NoticeView("ℹ️ No Locked Dice", f"There are no locked dice for **{display_name}**.\n\nUse `/lock_die` to lock one if needed.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -351,29 +384,31 @@ class Dice(commands.Cog):
         swing = await self.db_manager.get_swing(interaction.user.id, active_char)
 
         if not swing:
-            view = NoticeView("ℹ️ No Swing Set", f"**{display_name}** does not currently have an active swing set.", color=discord.Color.blue())
+            view = NoticeView("ℹ️ No Swing Set", f"**{display_name}** does not currently have an active swing set.", color=discord.Color.random())
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
         await self.db_manager.drop_swing(interaction.user.id, active_char)
-        view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.green())
+        view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
         await interaction.response.send_message(view=view)
 
     @app_commands.command(name="support", description="Share an attribute die to support an ally's roll")
     @app_commands.describe(user="The ally you want to support with a die")
     async def support(self, interaction: discord.Interaction, user: discord.User | discord.Member):
-        if user.id == interaction.user.id:
-            view = NoticeView("❌ Invalid Ally", "You cannot send a support die to yourself!")
-            await interaction.response.send_message(view=view, ephemeral=True)
-            return
-
         sender_char = await self._ensure_active_char(interaction)
         if not sender_char:
             return
 
+        char_color = await self._get_char_color(interaction.user.id, sender_char)
+
+        if user.id == interaction.user.id:
+            view = NoticeView("❌ Invalid Ally", "You cannot send a support die to yourself!", color=char_color)
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
+
         target_char = await self.db_manager.get_selected_char(user.id)
         if not target_char:
-            view = NoticeView("⚠️ Ally Has No Character", f"<@{user.id}> does not have an active character selected.")
+            view = NoticeView("⚠️ Ally Has No Character", f"<@{user.id}> does not have an active character selected.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
@@ -385,13 +420,60 @@ class Dice(commands.Cog):
         sender_display = await self.db_manager.get_char_display_name(sender_char)
 
         if not available:
-            view = NoticeView("⚠️ No Available Dice", f"You have no available dice to send as support for **{sender_display}**.\n\nAll dice are wounded, locked, or already supporting an ally.")
+            view = NoticeView("⚠️ No Available Dice", f"You have no available dice to send as support for **{sender_display}**.\n\nAll dice are wounded, locked, or already supporting an ally.", color=char_color)
             await interaction.response.send_message(view=view, ephemeral=True)
             return
 
         attr_names = await self.db_manager.get_attribute_names(interaction.user.id, sender_char)
         modal = SupportDieModal(self.bot, self.db_manager, sender_char, user, target_char, available, attr_names)
         await interaction.response.send_modal(modal)
+
+    @hp.command(name="heal", description="Restore current HP for your active character (cannot exceed Max HP)")
+    @app_commands.describe(amount="Amount of HP to restore")
+    async def hp_heal(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        display_name = await self.db_manager.get_char_display_name(active_char)
+        old_hp, new_hp, max_hp = await self.db_manager.heal_hp(interaction.user.id, active_char, amount)
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+        view = HPActionResultView(display_name, "heal", amount, old_hp, new_hp, max_hp, swing=swing)
+        await interaction.response.send_message(view=view)
+
+    @hp.command(name="damage", description="Deal damage to your active character's current HP")
+    @app_commands.describe(amount="Amount of damage taken")
+    async def hp_damage(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        display_name = await self.db_manager.get_char_display_name(active_char)
+        old_hp, new_hp, max_hp = await self.db_manager.damage_hp(interaction.user.id, active_char, amount)
+        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
+        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
+        view = HPActionResultView(
+            display_name,
+            "damage",
+            amount,
+            old_hp,
+            new_hp,
+            max_hp,
+            total_attrs=len(all_attrs),
+            wounded_count=len(wounded),
+            swing=swing
+        )
+        await interaction.response.send_message(view=view)
+
+    @hp.command(name="max", description="Open the Manage Max HP submenu (Level Up Potential brackets or custom adjust)")
+    async def hp_max(self, interaction: discord.Interaction):
+        active_char = await self._ensure_active_char(interaction)
+        if not active_char:
+            return
+
+        view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
+        await interaction.response.send_message(view=view)
 
     @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
     async def help_command(self, interaction: discord.Interaction):
@@ -401,17 +483,17 @@ class Dice(commands.Cog):
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
                 "**`/set_attributes`**\n"
-                "• Create a new character or open the character management dashboard.\n"
-                "• Add, edit, or delete attributes and set their bonuses (+0 to +9).\n"
-                "• Name your attributes (e.g. Red 'Passion', Blue 'Focus').\n"
-                "• Switch your active character or delete characters.\n\n"
+                "• Create a new character (automatically starts at **10 / 10 HP**) or open the character setup menu.\n"
+                "• Add, edit, or delete attributes and set their levels (+0 to +9).\n"
+                "• Give attributes custom titles (e.g. Red *'Passion'*, Blue *'Focus'*).\n"
+                "• Switch active characters or delete characters.\n\n"
                 "**`/change_active_character`**\n"
-                "• Quick slash command to switch your currently active character.\n\n"
+                "• Quickly switch which character you are currently playing.\n\n"
                 "**`/character_card`**\n"
-                "• View your character sheet: active swing, attributes & bonuses, wounded dice, and locked dice.\n"
-                "• Includes an interactive switcher to view other characters you own."
+                "• View your character sheet: **Current / Max HP**, active Swing, attributes & bonuses, locked dice, and wounded dice.\n"
+                "• Includes a dropdown to switch characters and the **❤️ Manage Max HP** button."
             ),
-            accent_color=discord.Color.blue()
+            accent_color=discord.Color.random()
         )
 
         # Page 2: Rolls
@@ -420,62 +502,85 @@ class Dice(commands.Cog):
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
                 "**`/roll_to_dye`**\n"
-                "• Reactive / defensive roll when things happen to your character (dodging, resisting magic, emotional endurance).\n"
+                "• Reactive / defensive roll when things happen to your character (dodging, resisting magic, enduring distress).\n"
                 "• Rolls a d6 for each unwounded and unlocked attribute.\n"
-                "• If a Swing is active, the swing die is not rerolled—its value and bonus are added.\n"
-                "• Use the **Set Swing** button on the roll to select a new active Swing.\n"
-                "• Use the **Apply Support Die** button to add an ally's support die to the roll.\n\n"
+                "• If a Swing is active, the swing die is not rerolled—its saved value and bonus are added.\n"
+                "• Use **Set Swing** on the roll message to pick a new active Swing, or **Apply Support Die** to roll a shared die.\n\n"
                 "**`/roll_to_do`**\n"
-                "• Action / proactive roll to affect the world (attacks, feats of skill, social maneuvers).\n"
-                "• If a Swing is set: rolls a **d20 + your Swing** (die value + attribute bonus). A natural 20 is a Critical (doubles damage/effect)!\n"
-                "• If no Swing is set: rolls a **1d20 + 1d6 Wild** roll with no bonuses.\n\n"
+                "• Proactive roll to impact the world (attacks, skill checks, social actions).\n"
+                "• With a Swing: rolls **1d20 + Swing** (die value + attribute bonus). Rolling a 20 on the d20 is a **Critical** (doubles damage/effect)!\n"
+                "• Without a Swing: rolls **1d20 + 1d6 Wild** with no attribute bonus.\n\n"
                 "**`/roll_to_recover`**\n"
-                "• Used during a Rest or after being Wounded to restore HP.\n"
-                "• Automatically unlocks all locked dice, then rolls unwounded dice + bonuses.\n"
-                "• Allows choosing a new Swing die from the recovery roll."
+                "• Used during a Rest or after sustaining a Wound to unlock all locked dice and automatically recover HP:\n"
+                "  - **At `0 HP`**: Your roll total becomes your new Current HP (capped at Max HP).\n"
+                "  - **Above `0 HP`**: Your roll total is added to your Current HP (capped at Max HP).\n"
+                "  - **No unwounded dice left**: Restores **+1 HP**."
             ),
-            accent_color=discord.Color.green()
+            accent_color=discord.Color.random()
         )
 
-        # Page 3: Dice States & Support
+        # Page 3: Health (HP), Damage & Leveling Up
         page3 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## ❤️ **Sentiment Guide: Health (HP) & Leveling**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**`/hp damage <amount>`**\n"
+                "• Subtracts damage from your active character's Current HP (cannot drop below `0`).\n"
+                "• **Hitting `0 HP` (Wound):** Displays a reminder to run **`/wound_die`** and **`/roll_to_recover`**, or choose to **Leave the Scene** (fleeing/passing out to avoid further damage in the current Scene/Conflict).\n"
+                "• **All Dice Wounded + `0 HP`:** Displays a **Death / Leave the Scene** alert.\n\n"
+                "**`/hp heal <amount>`**\n"
+                "• Restores Current HP for other healing effects without changing your Max HP (capped at Max HP).\n\n"
+                "**`/hp max` & `❤️ Manage Max HP` Button (on `/character_card`)**\n"
+                "• Opens the Max HP submenu to increase/decrease Max HP (increasing Max HP also increases Current HP by the same amount).\n"
+                "• **Spend Potential (Level-Up Brackets):**\n"
+                "  - `10–19 Max HP`: **+5 HP** flat or roll **1d6 + 1**\n"
+                "  - `20–39 Max HP`: **+3 HP** flat or roll **1d6**\n"
+                "  - `40–59 Max HP`: **+2 HP** flat or roll **1d6 - 1**\n"
+                "  - `60+ Max HP`: **+1 HP** flat\n"
+                "• **Custom Adjust / Set:** Add/subtract any amount (`+5`, `-3`) or set an exact Max HP (great for NPCs or custom buffs)."
+            ),
+            accent_color=discord.Color.random()
+        )
+
+        # Page 4: Dice States & Support
+        page4 = discord.ui.Container(
             discord.ui.TextDisplay(content="## 🔒 **Sentiment Guide: Dice States & Support**"),
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
                 "**`/wound_die` & `/unwound_die`**\n"
-                "• When HP reaches 0 or from extreme trauma, wound an attribute die.\n"
-                "• Wounding removes that die from future rolls until treated, and **automatically unlocks all locked dice**.\n"
-                "• Use `/unwound_die` when receiving healing or resting between sessions.\n\n"
+                "• Wound an attribute die when hitting `0 HP` or pushing your character to the limit.\n"
+                "• Wounding removes that die from rolls until healed and **automatically unlocks all locked dice**.\n"
+                "• Use `/unwound_die` when wounds heal between sessions or from treatment.\n\n"
                 "**`/lock_die` & `/unlock_die`**\n"
-                "• Temporarily lock an attribute die for powerful actions (Sprint, Push, Block, Tag a Prop).\n"
-                "• Locking your Swing drops it. All locked dice unlock at the start of your turn or during recovery.\n\n"
+                "• Lock an unwounded die to use abilities (Sprint, Push, Block, Tag a Prop). Locking your Swing drops it.\n"
+                "• Locked dice unlock at the start of your turn, end of a Scene, or when you `/roll_to_recover`.\n\n"
                 "**`/drop_swing`**\n"
-                "• Clear your active swing to become colorless.\n\n"
+                "• Drop your active Swing to become colorless.\n\n"
                 "**`/support`**\n"
-                "• Share an attribute die with an ally. It provides an extra **+1d6** button on their next roll.\n"
-                "• Once used by your ally, the die automatically returns to you **locked**."
+                "• Pass an available attribute die to an ally (`+1d6` button on their next roll). Returns to you **locked** after use."
             ),
-            accent_color=discord.Color.orange()
+            accent_color=discord.Color.random()
         )
 
-        # Page 4: GM & Situational Rules
-        page4 = discord.ui.Container(
+        # Page 5: GM & Situational Rules
+        page5 = discord.ui.Container(
             discord.ui.TextDisplay(content="## ⚖️ **Sentiment Guide: GM & Combat Reference**"),
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
                 "**`/set_gm`**\n"
-                "• Set or transfer the designated Game Master for the server.\n\n"
+                "• Set or transfer the designated Game Master for the server.\n"
+                "• The GM can mark/unmark characters as **NPCs** in `/set_attributes` (appends `(NPC)` to their display name).\n\n"
                 "**Combat & Clashing**\n"
                 "• If you Roll to Do against an opponent dyed the same color as your Swing, a **Clash** occurs!\n"
                 "• Both sides Roll to Do. If the attacker wins, damage is doubled; if the defender wins, they immediately get a free reprise action!\n\n"
                 "**Conflict Flow**\n"
                 "• Each turn in a Conflict gives 1 Action and 1 Move. You can lock dice to Sprint for extra moves."
             ),
-            accent_color=discord.Color.purple()
+            accent_color=discord.Color.random()
         )
 
         paginator = ButtonPaginator.create_standard_paginator(
-            [page1, page2, page3, page4],
+            [page1, page2, page3, page4, page5],
             author_id=interaction.user.id,
             timeout=300.0
         )

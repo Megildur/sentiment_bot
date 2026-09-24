@@ -1,5 +1,6 @@
 import discord
 import random
+from typing import Optional
 from .Constants import COLOR_EMOJIS
 
 MODAL_COLOR_EMOJIS = COLOR_EMOJIS.copy()
@@ -17,6 +18,11 @@ COLOR_DISCORD_COLORS = {
     "White": discord.Color.from_rgb(245, 245, 245),
     "Clear": discord.Color.teal()
 }
+
+def get_swing_accent_color(swing: Optional[tuple] = None) -> discord.Color:
+    if swing and swing[0] in COLOR_DISCORD_COLORS:
+        return COLOR_DISCORD_COLORS[swing[0]]
+    return discord.Color.random()
 
 class AddGMButton(discord.ui.Button):
     def __init__(self, bot, user_id, db_manager):
@@ -159,6 +165,7 @@ class AttributeSetView(discord.ui.LayoutView):
         is_gm = await db_manager.is_gm(interaction.user.id)
         is_npc = await db_manager.is_npc(char_name)
         display_name = await db_manager.get_char_display_name(char_name)
+        swing = await db_manager.get_swing(interaction.user.id, char_name)
         
         return cls(
             bot=bot, 
@@ -171,10 +178,11 @@ class AttributeSetView(discord.ui.LayoutView):
             is_new=is_new,
             is_gm=is_gm,
             is_npc=is_npc,
-            display_name=display_name
+            display_name=display_name,
+            swing=swing
         )
 
-    def __init__(self, bot, interaction, db_manager, char_name: str, result: list, all_chars: list, attribute_names: dict = None, is_new: bool = False, is_gm: bool = False, is_npc: bool = False, display_name: str = None):
+    def __init__(self, bot, interaction, db_manager, char_name: str, result: list, all_chars: list, attribute_names: dict = None, is_new: bool = False, is_gm: bool = False, is_npc: bool = False, display_name: str = None, swing: tuple = None):
         super().__init__(timeout=None)
         self.bot = bot
         self.user_id = interaction.user.id
@@ -262,7 +270,7 @@ class AttributeSetView(discord.ui.LayoutView):
             discord.ui.TextDisplay("Press this button to close this menu"),
             accessory=CloseMenuButton()
         ))
-        container.accent_color = discord.Color.random()
+        container.accent_color = get_swing_accent_color(swing)
 
         self.add_item(container)
 
@@ -457,7 +465,8 @@ class DeleteCharSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         char_to_delete = self.values[0]
-        view = ConfirmDeleteCharView(self.bot, self.db_manager, char_to_delete, self.active_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, char_to_delete)
+        view = ConfirmDeleteCharView(self.bot, self.db_manager, char_to_delete, self.active_char, swing=swing)
         await interaction.response.edit_message(view=view)
 
 class NoCharactersLeftView(discord.ui.LayoutView):
@@ -475,7 +484,7 @@ class NoCharactersLeftView(discord.ui.LayoutView):
                 CreateCharButton(bot, db_manager),
                 CloseMenuButton()
             ),
-            accent_color=discord.Color.yellow()
+            accent_color=discord.Color.random()
         )
         self.add_item(container)
 
@@ -520,7 +529,7 @@ class ConfirmDeleteButton(discord.ui.Button):
             await interaction.response.edit_message(view=view)
 
 class ConfirmDeleteCharView(discord.ui.LayoutView):
-    def __init__(self, bot, db_manager, char_to_delete: str, active_char: str):
+    def __init__(self, bot, db_manager, char_to_delete: str, active_char: str, swing: tuple = None):
         super().__init__(timeout=300)
         
         container = discord.ui.Container(
@@ -533,7 +542,7 @@ class ConfirmDeleteCharView(discord.ui.LayoutView):
                 CancelDeleteButton(bot, db_manager, active_char),
                 ConfirmDeleteButton(bot, db_manager, char_to_delete, active_char)
             ),
-            accent_color=discord.Color.red()
+            accent_color=get_swing_accent_color(swing)
         )
         self.add_item(container)
 
@@ -552,7 +561,7 @@ class NewActiveCharSelect(discord.ui.Select):
         await interaction.response.edit_message(view=view)
 
 class SelectNewActiveCharView(discord.ui.LayoutView):
-    def __init__(self, bot, db_manager, all_chars: list, deleted_char: str = None):
+    def __init__(self, bot, db_manager, all_chars: list, deleted_char: str = None, swing: tuple = None):
         super().__init__(timeout=300)
         
         title = "## **Select New Character**"
@@ -569,7 +578,8 @@ class SelectNewActiveCharView(discord.ui.LayoutView):
             discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
             discord.ui.ActionRow(
                 NewActiveCharSelect(bot, db_manager, all_chars)
-            )
+            ),
+            accent_color=get_swing_accent_color(swing)
         )
         self.add_item(container)
 
@@ -660,13 +670,13 @@ class ToggleNPCButton(discord.ui.Button):
 
 
 class NoticeView(discord.ui.LayoutView):
-    def __init__(self, title: str, body: str, color: discord.Color = discord.Color.yellow()):
+    def __init__(self, title: str, body: str, color: Optional[discord.Color] = None):
         super().__init__(timeout=300)
         container = discord.ui.Container(
             discord.ui.TextDisplay(content=f"## {title}"),
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=body),
-            accent_color=color
+            accent_color=color if color is not None else discord.Color.random()
         )
         self.add_item(container)
 
@@ -692,6 +702,297 @@ class ChangeCardCharSelect(discord.ui.Select):
         await interaction.response.edit_message(view=view)
 
 
+class ManageMaxHPButton(discord.ui.Button):
+    def __init__(self, bot, db_manager, char_name: str):
+        super().__init__(label="Manage Max HP", style=discord.ButtonStyle.primary, emoji="❤️", custom_id="manage_max_hp_btn")
+        self.bot = bot
+        self.db_manager = db_manager
+        self.char_name = char_name
+
+    async def callback(self, interaction: discord.Interaction):
+        view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, self.char_name)
+        await interaction.response.edit_message(view=view)
+
+
+class BackToCharacterCardButton(discord.ui.Button):
+    def __init__(self, bot, db_manager, char_name: str):
+        super().__init__(label="Back to Character Card", style=discord.ButtonStyle.secondary, emoji="⬅️", custom_id="back_to_card_btn")
+        self.bot = bot
+        self.db_manager = db_manager
+        self.char_name = char_name
+
+    async def callback(self, interaction: discord.Interaction):
+        view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
+        await interaction.response.edit_message(view=view)
+
+
+class PotentialFlatHPButton(discord.ui.Button):
+    def __init__(self, parent_view, flat_gain: int):
+        super().__init__(
+            label=f"Level Up: +{flat_gain} Max HP (Flat)",
+            style=discord.ButtonStyle.success,
+            emoji="✨",
+            custom_id="pot_flat_hp_btn"
+        )
+        self.parent_view = parent_view
+        self.flat_gain = flat_gain
+
+    async def callback(self, interaction: discord.Interaction):
+        old_cur, old_max, new_cur, new_max = await self.parent_view.db_manager.adjust_max_hp(
+            self.parent_view.user_id, self.parent_view.char_name, self.flat_gain
+        )
+        status_msg = (
+            f"✨ **Spent 1 Potential (Default Option):**\n"
+            f"• Max HP increased by **+{self.flat_gain}** (`{old_max}` ➔ `{new_max}`)\n"
+            f"• Current HP increased (`{old_cur}/{old_max}` ➔ `{new_cur}/{new_max}`)"
+        )
+        view = await ManageMaxHPView.build(
+            self.parent_view.bot, interaction, self.parent_view.db_manager, self.parent_view.char_name, status_note=status_msg
+        )
+        await interaction.response.edit_message(view=view)
+
+
+class PotentialRollHPButton(discord.ui.Button):
+    def __init__(self, parent_view, bracket_info: dict):
+        can_roll = bracket_info["can_roll"]
+        label = f"Level Up: Roll {bracket_info['roll_label']}" if can_roll else "Roll Unavailable (60+ Max HP)"
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.primary,
+            emoji="🎲",
+            disabled=not can_roll,
+            custom_id="pot_roll_hp_btn"
+        )
+        self.parent_view = parent_view
+        self.bracket_info = bracket_info
+
+    async def callback(self, interaction: discord.Interaction):
+        d6_val = random.randint(1, 6)
+        mod = self.bracket_info["roll_mod"]
+        gained = max(0, d6_val + mod)
+        old_cur, old_max, new_cur, new_max = await self.parent_view.db_manager.adjust_max_hp(
+            self.parent_view.user_id, self.parent_view.char_name, gained
+        )
+        mod_str = f" + {mod}" if mod > 0 else (f" - {abs(mod)}" if mod < 0 else "")
+        status_msg = (
+            f"🎲 **Spent 1 Potential (Randomized {self.bracket_info['roll_label']}):**\n"
+            f"• Rolled **1d6 ({d6_val}){mod_str} = +{gained} Max HP**\n"
+            f"• HP Updated: `{old_cur}/{old_max}` ➔ `{new_cur}/{new_max}`"
+        )
+        view = await ManageMaxHPView.build(
+            self.parent_view.bot, interaction, self.parent_view.db_manager, self.parent_view.char_name, status_note=status_msg
+        )
+        await interaction.response.edit_message(view=view)
+
+
+class CustomMaxHPModal(discord.ui.Modal):
+    def __init__(self, bot, db_manager, char_name: str, current_max: int):
+        super().__init__(title=f"Adjust Max HP: {char_name[:25]}")
+        self.bot = bot
+        self.db_manager = db_manager
+        self.char_name = char_name
+
+        self.delta_input = discord.ui.TextInput(
+            label="Increase or Decrease Max HP (e.g. +5 or -3)",
+            placeholder="Enter +amount to add or -amount to subtract (leave blank if setting exact)",
+            required=False,
+            max_length=10
+        )
+        self.exact_input = discord.ui.TextInput(
+            label=f"OR Set Exact Max HP (Current: {current_max})",
+            placeholder="Enter exact new Max HP (e.g. 15, 25)",
+            required=False,
+            max_length=10
+        )
+        self.add_item(self.delta_input)
+        self.add_item(self.exact_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        delta_raw = self.delta_input.value.strip()
+        exact_raw = self.exact_input.value.strip()
+
+        if not delta_raw and not exact_raw:
+            await interaction.response.send_message("❌ Please provide either an amount to add/subtract or an exact Max HP value.", ephemeral=True)
+            return
+
+        try:
+            if exact_raw:
+                target_val = int(exact_raw)
+                if target_val < 1:
+                    await interaction.response.send_message("❌ Max HP must be at least 1.", ephemeral=True)
+                    return
+                old_cur, old_max, new_cur, new_max = await self.db_manager.set_max_hp_value(
+                    interaction.user.id, self.char_name, target_val
+                )
+                diff = new_max - old_max
+                diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
+                status_msg = (
+                    f"⚙️ **Max HP Set to {new_max} ({diff_str}):**\n"
+                    f"• HP Updated: `{old_cur}/{old_max}` ➔ `{new_cur}/{new_max}`"
+                )
+            else:
+                delta_val = int(delta_raw)
+                old_cur, old_max, new_cur, new_max = await self.db_manager.adjust_max_hp(
+                    interaction.user.id, self.char_name, delta_val
+                )
+                diff = new_max - old_max
+                diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
+                status_msg = (
+                    f"⚙️ **Max HP Adjusted ({diff_str}):**\n"
+                    f"• HP Updated: `{old_cur}/{old_max}` ➔ `{new_cur}/{new_max}`"
+                )
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid number entered. Please enter an integer (like `+5`, `-2`, or `20`).", ephemeral=True)
+            return
+
+        view = await ManageMaxHPView.build(
+            self.bot, interaction, self.db_manager, self.char_name, status_note=status_msg
+        )
+        await interaction.response.edit_message(view=view)
+
+
+class CustomAdjustMaxHPButton(discord.ui.Button):
+    def __init__(self, parent_view):
+        super().__init__(
+            label="Custom Increase / Decrease / Set",
+            style=discord.ButtonStyle.secondary,
+            emoji="⚙️",
+            custom_id="custom_adj_max_hp_btn"
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        modal = CustomMaxHPModal(
+            self.parent_view.bot,
+            self.parent_view.db_manager,
+            self.parent_view.char_name,
+            self.parent_view.max_hp
+        )
+        await interaction.response.send_modal(modal)
+
+
+class ManageMaxHPView(discord.ui.LayoutView):
+    @classmethod
+    async def build(cls, bot, interaction: discord.Interaction, db_manager, char_name: str, status_note: Optional[str] = None):
+        current_hp, max_hp = await db_manager.get_hp(interaction.user.id, char_name)
+        display_name = await db_manager.get_char_display_name(char_name)
+        bracket_info = db_manager.get_potential_hp_bracket(max_hp)
+        swing = await db_manager.get_swing(interaction.user.id, char_name)
+        return cls(
+            bot=bot,
+            user_id=interaction.user.id,
+            db_manager=db_manager,
+            char_name=char_name,
+            display_name=display_name,
+            current_hp=current_hp,
+            max_hp=max_hp,
+            bracket_info=bracket_info,
+            status_note=status_note,
+            swing=swing
+        )
+
+    def __init__(self, bot, user_id: int, db_manager, char_name: str, display_name: str, current_hp: int, max_hp: int, bracket_info: dict, status_note: Optional[str] = None, swing: Optional[tuple] = None):
+        super().__init__(timeout=600)
+        self.bot = bot
+        self.user_id = user_id
+        self.db_manager = db_manager
+        self.char_name = char_name
+        self.display_name = display_name
+        self.current_hp = current_hp
+        self.max_hp = max_hp
+        self.bracket_info = bracket_info
+
+        lines = [
+            f"**Character:** *{display_name}*",
+            f"### ❤️ Current Health: `{current_hp} / {max_hp} HP`\n"
+        ]
+        if status_note:
+            lines.append(f"{status_note}\n")
+
+        lines.append(
+            "### 📈 Sentiment Level-Up Brackets (Per 1 Potential Spent)\n"
+            "• **10–19 Max HP:** `+5 HP` (Default) or `1d6 + 1` (Rolled)\n"
+            "• **20–39 Max HP:** `+3 HP` (Default) or `1d6` (Rolled)\n"
+            "• **40–59 Max HP:** `+2 HP` (Default) or `1d6 - 1` (Rolled)\n"
+            "• **60+ Max HP:** `+1 HP` (Default only)\n\n"
+            f"👉 **Your Active Bracket ({bracket_info['bracket']} Max HP):** "
+            f"**+{bracket_info['flat_gain']} HP** flat or **{bracket_info['roll_label']}** rolled.\n"
+            "-# Note: Increasing Max HP also increases Current HP by the same amount."
+        )
+
+        container = discord.ui.Container(
+            discord.ui.TextDisplay(content="## ❤️ **Manage Max HP**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content="\n".join(lines)),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.ActionRow(
+                PotentialFlatHPButton(self, bracket_info["flat_gain"]),
+                PotentialRollHPButton(self, bracket_info),
+                CustomAdjustMaxHPButton(self)
+            ),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.ActionRow(
+                BackToCharacterCardButton(self.bot, self.db_manager, self.char_name),
+                CloseMenuButton()
+            ),
+            accent_color=get_swing_accent_color(swing)
+        )
+        self.add_item(container)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("❌ This HP menu is not for you.", ephemeral=True)
+        return False
+
+
+class HPActionResultView(discord.ui.LayoutView):
+    def __init__(self, display_name: str, action_type: str, amount: int, old_hp: int, new_hp: int, max_hp: int, total_attrs: int = 3, wounded_count: int = 0, swing: Optional[tuple] = None):
+        super().__init__(timeout=300)
+        if action_type == "heal":
+            title = "💚 **Character Healed**"
+            actual_healed = new_hp - old_hp
+            lines = [
+                f"**Character:** *{display_name}*",
+                f"**Healing Applied:** `+{amount} HP` (*Restored {actual_healed} HP*)",
+                f"### ❤️ HP: `{old_hp} / {max_hp}` ➔ **`{new_hp} / {max_hp}`**"
+            ]
+            if new_hp == max_hp:
+                lines.append("-# Character is at Maximum HP!")
+        else:
+            title = "💥 **Damage Sustained**"
+            actual_dmg = old_hp - new_hp
+            lines = [
+                f"**Character:** *{display_name}*",
+                f"**Damage Taken:** `-{amount} HP` (*Lost {actual_dmg} HP*)",
+                f"### ❤️ HP: `{old_hp} / {max_hp}` ➔ **`{new_hp} / {max_hp}`**"
+            ]
+            if new_hp == 0:
+                if total_attrs > 0 and wounded_count >= total_attrs:
+                    lines.append(
+                        "\n### 💀 **0 HP & ALL ATTRIBUTES WOUNDED — DEATH / LEAVE THE SCENE!**\n"
+                        "• All of your character's Attributes are already **Wounded** and your HP has reached **0**.\n"
+                        "• Per Sentiment rules, your character either **dies** or must choose to **Leave the Scene** (fleeing or passing out so you can no longer sustain further damage in this Scene/Conflict)."
+                    )
+                else:
+                    lines.append(
+                        "\n### ⚠️ **0 HP REACHED — SUSTAINED A WOUND!**\n"
+                        "• Hitting **0 HP** causes your character to sustain a **Wound**!\n"
+                        "• **Next Steps:**\n"
+                        "  1. Run **`/wound_die`** to choose an Attribute die to Wound *(automatically unlocks all locked dice)*.\n"
+                        "  2. Run **`/roll_to_recover`** to roll your unwounded dice and determine your new Current HP!\n"
+                        "• 🛡️ **Leave the Scene Option:** Whenever you become Wounded in a Scene or Conflict, you may also choose to **Leave the Scene** (fleeing or passing out). You still Wound a die and Roll to Recover as normal, but cannot sustain further damage from this Scene or Conflict."
+                    )
+
+        container = discord.ui.Container(
+            discord.ui.TextDisplay(content=title),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content="\n".join(lines)),
+            accent_color=get_swing_accent_color(swing)
+        )
+        self.add_item(container)
+
+
 class CharacterCardView(discord.ui.LayoutView):
     @classmethod
     async def build(cls, bot, interaction: discord.Interaction, db_manager, char_name: str):
@@ -702,6 +1003,7 @@ class CharacterCardView(discord.ui.LayoutView):
         locked = await db_manager.get_locked(interaction.user.id, char_name)
         all_chars = await db_manager.get_all_characters(interaction.user.id)
         display_name = await db_manager.get_char_display_name(char_name)
+        current_hp, max_hp = await db_manager.get_hp(interaction.user.id, char_name)
 
         return cls(
             bot=bot,
@@ -714,10 +1016,12 @@ class CharacterCardView(discord.ui.LayoutView):
             swing=swing,
             wounded=wounded,
             locked=locked,
-            all_chars=all_chars
+            all_chars=all_chars,
+            current_hp=current_hp,
+            max_hp=max_hp
         )
 
-    def __init__(self, bot, interaction, db_manager, char_name: str, display_name: str, attributes: list, attribute_names: dict, swing: tuple, wounded: list, locked: list, all_chars: list):
+    def __init__(self, bot, interaction, db_manager, char_name: str, display_name: str, attributes: list, attribute_names: dict, swing: tuple, wounded: list, locked: list, all_chars: list, current_hp: int = 10, max_hp: int = 10):
         super().__init__(timeout=None)
         self.bot = bot
         self.user_id = interaction.user.id
@@ -768,9 +1072,18 @@ class CharacterCardView(discord.ui.LayoutView):
         else:
             wounded_text = "None"
 
+        if current_hp == 0:
+            if sorted_attrs and len(wounded) >= len(sorted_attrs):
+                hp_status = f"💀 **`{current_hp} / {max_hp} HP`** *(0 HP & All Dice Wounded — Death / Leave the Scene!)*"
+            else:
+                hp_status = f"⚠️ **`{current_hp} / {max_hp} HP`** *(0 HP — Wounded! Use `/wound_die` & `/roll_to_recover`)*"
+        else:
+            hp_status = f"❤️ **`{current_hp} / {max_hp} HP`**"
+
         body = (
             f"**Player:** <@{interaction.user.id}>\n"
-            f"**Character:** *{display_name}*\n\n"
+            f"**Character:** *{display_name}*\n"
+            f"**Health (HP):** {hp_status}\n\n"
             f"### 🎯 Active Swing\n{swing_text}\n\n"
             f"### 📊 Attributes & Bonuses\n{attrs_text}\n\n"
             f"### 🔒 Locked Dice\n{locked_text}\n\n"
@@ -785,9 +1098,9 @@ class CharacterCardView(discord.ui.LayoutView):
             discord.ui.TextDisplay(content="Switch active character:"),
             discord.ui.ActionRow(ChangeCardCharSelect(self.bot, db_manager, all_chars, active_char=self.char_name)),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-            discord.ui.Section(
-                discord.ui.TextDisplay("Press this button to close this card"),
-                accessory=CloseMenuButton()
+            discord.ui.ActionRow(
+                ManageMaxHPButton(self.bot, db_manager, self.char_name),
+                CloseMenuButton()
             ),
             accent_color=accent_color
         )
@@ -959,6 +1272,7 @@ class SupportDieModal(discord.ui.Modal):
         )
         sender_display = await self.db_manager.get_char_display_name(self.sender_char)
         target_display = await self.db_manager.get_char_display_name(self.target_char)
+        swing = await self.db_manager.get_swing(interaction.user.id, self.sender_char)
         emoji = COLOR_EMOJIS.get(chosen_color, "⚪")
 
         view = discord.ui.LayoutView()
@@ -970,7 +1284,7 @@ class SupportDieModal(discord.ui.Modal):
                         f"• An extra +1d6 is now available on {target_display}'s next Roll to Dye or Roll to Do.\n"
                         f"• When used, the die will automatically return to {sender_display} **locked**."
             ),
-            accent_color=COLOR_DISCORD_COLORS.get(chosen_color, discord.Color.blue())
+            accent_color=get_swing_accent_color(swing)
         )
         view.add_item(container)
         await interaction.response.send_message(view=view)
@@ -1246,7 +1560,7 @@ class RollToDoView(discord.ui.LayoutView):
 
 
 class RollToRecoverView(discord.ui.LayoutView):
-    def __init__(self, bot, user_id: int, char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, db_manager):
+    def __init__(self, bot, user_id: int, char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, db_manager, old_hp: int = 10, new_hp: int = 10, max_hp: int = 10):
         super().__init__(timeout=600)
         self.bot = bot
         self.user_id = user_id
@@ -1255,6 +1569,9 @@ class RollToRecoverView(discord.ui.LayoutView):
         self.rolled_dice = rolled_dice  # list of dicts: {'color', 'name', 'roll', 'bonus'}
         self.swing_info = swing_info    # (swing_color, swing_val, swing_bonus) or None
         self.db_manager = db_manager
+        self.old_hp = old_hp
+        self.new_hp = new_hp
+        self.max_hp = max_hp
         self.render_view()
 
     def get_swing_choices(self) -> list:
@@ -1265,31 +1582,37 @@ class RollToRecoverView(discord.ui.LayoutView):
 
         if self.rolled_dice:
             dice_lines = []
-            total_hp = 0
+            total_roll = 0
             for d in self.rolled_dice:
                 emoji = COLOR_EMOJIS.get(d['color'], "⚪")
                 custom_name = d.get('name', 'None')
                 subtotal = d['roll'] + d['bonus']
-                total_hp += subtotal
+                total_roll += subtotal
                 is_swing_mark = " ⭐ **[NEW SWING]**" if self.swing_info and self.swing_info[0] == d['color'] else ""
                 dice_lines.append(f"• {emoji} **{d['color']}** (*{custom_name}*): Die **{d['roll']}** + Bonus **+{d['bonus']}** = **{subtotal}**{is_swing_mark}")
             dice_text = "\n".join(dice_lines)
         else:
-            dice_text = "• *All attributes are wounded! Recovering base minimal 1 HP.*"
-            total_hp = 1
+            dice_text = "• *All attributes are wounded! Recovering base minimal +1 HP.*"
+            total_roll = 1
+
+        if not self.rolled_dice:
+            recovery_rule_note = f"• **No Unwounded Dice Left:** Gained **+1 HP** (`{self.old_hp}` + `1` ➔ `{self.new_hp} / {self.max_hp}`)"
+        elif self.old_hp <= 0:
+            recovery_rule_note = f"• **Recovering from 0 HP:** Roll total (**{total_roll}**) sets your new Current HP (`0` ➔ `{self.new_hp} / {self.max_hp}`)"
+        else:
+            recovery_rule_note = f"• **Resting with Remaining HP (`{self.old_hp} HP`):** Roll total (**+{total_roll}**) added to Current HP (`{self.old_hp}` + `{total_roll}` ➔ `{self.new_hp} / {self.max_hp}`)"
 
         lines = [
             f"**Character:** *{self.display_name}*\n",
             "🔓 *All previously locked dice have been unlocked!*\n",
-            "### 💚 Recovered Health Breakdown",
+            "### 💚 Recovery Roll Breakdown",
             dice_text,
-            f"\n### 💚 **Total HP Restored: {total_hp}**",
+            f"\n### ❤️ **HP Updated: `{self.old_hp} / {self.max_hp}` ➔ `{self.new_hp} / {self.max_hp} HP`**",
+            recovery_rule_note,
             "-# Note: Total current HP cannot exceed your character's Maximum HP."
         ]
 
-        accent_color = discord.Color.green()
-        if self.swing_info and self.swing_info[0] in COLOR_DISCORD_COLORS:
-            accent_color = COLOR_DISCORD_COLORS[self.swing_info[0]]
+        accent_color = get_swing_accent_color(self.swing_info)
 
         container = discord.ui.Container(
             discord.ui.TextDisplay(content="## 💚 **Roll to Recover**"),

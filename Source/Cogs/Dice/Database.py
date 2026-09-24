@@ -100,6 +100,19 @@ class DiceDatabase():
                 PRIMARY KEY (user_id, char_name, locked)
             )
         ''')
+        await self.db.execute('''
+            CREATE TABLE IF NOT EXISTS hp (
+                user_id INTEGER,
+                char_name TEXT,
+                current_hp INTEGER DEFAULT 10,
+                max_hp INTEGER DEFAULT 10,
+                PRIMARY KEY (user_id, char_name)
+            )
+        ''')
+        await self.db.execute('''
+            INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp)
+            SELECT DISTINCT user_id, char_name, 10, 10 FROM attributes
+        ''')
         await self.db.commit()
 
     async def set_gm_check(self, interaction, user_id: int):
@@ -146,6 +159,10 @@ class DiceDatabase():
                     "INSERT OR REPLACE INTO attributes (user_id, char_name, attribute, attribute_value) VALUES (?, ?, ?, ?)",
                     data
                 )
+            await self.db.execute(
+                "INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp) VALUES (?, ?, 10, 10)",
+                (interaction.user.id, char_name)
+            )
             await self.db.commit()
 
     async def edit_attribute(self, interaction: discord.Interaction, char_name: str, old_color: str, new_color: str, new_bonus: int):
@@ -212,6 +229,7 @@ class DiceDatabase():
             await self.db.execute("DELETE FROM swing WHERE user_id = ? AND char_name = ?", (user_id, char_name))
             await self.db.execute("DELETE FROM wounded WHERE user_id = ? AND char_name = ?", (user_id, char_name))
             await self.db.execute("DELETE FROM locked WHERE user_id = ? AND char_name = ?", (user_id, char_name))
+            await self.db.execute("DELETE FROM hp WHERE user_id = ? AND char_name = ?", (user_id, char_name))
             await self.db.execute(
                 "DELETE FROM support_die WHERE (share_support_user_id = ? AND share_support_char_name = ?) OR (recieve_support_user_id = ? AND recieve_support_char_name = ?)",
                 (user_id, char_name, user_id, char_name)
@@ -437,4 +455,108 @@ class DiceDatabase():
                 (share_user_id, share_char, attribute)
             )
             await self.db.commit()
+
+    # --- HP Helpers ---
+    async def get_hp(self, user_id: int, char_name: str) -> Tuple[int, int]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT current_hp, max_hp FROM hp WHERE user_id = ? AND char_name = ?",
+                (user_id, char_name)
+            )
+            row = await cursor.fetchone()
+            if row is not None:
+                return int(row[0]), int(row[1])
+            await self.db.execute(
+                "INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp) VALUES (?, ?, 10, 10)",
+                (user_id, char_name)
+            )
+            await self.db.commit()
+            return 10, 10
+
+    async def set_hp(self, user_id: int, char_name: str, current_hp: int, max_hp: int) -> Tuple[int, int]:
+        max_hp = max(1, int(max_hp))
+        current_hp = max(0, min(int(current_hp), max_hp))
+        async with self.db_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO hp (user_id, char_name, current_hp, max_hp) VALUES (?, ?, ?, ?)",
+                (user_id, char_name, current_hp, max_hp)
+            )
+            await self.db.commit()
+        return current_hp, max_hp
+
+    async def heal_hp(self, user_id: int, char_name: str, amount: int) -> Tuple[int, int, int]:
+        old_hp, max_hp = await self.get_hp(user_id, char_name)
+        new_hp = min(max_hp, max(0, old_hp + max(0, int(amount))))
+        await self.set_hp(user_id, char_name, new_hp, max_hp)
+        return old_hp, new_hp, max_hp
+
+    async def damage_hp(self, user_id: int, char_name: str, amount: int) -> Tuple[int, int, int]:
+        old_hp, max_hp = await self.get_hp(user_id, char_name)
+        new_hp = max(0, old_hp - max(0, int(amount)))
+        await self.set_hp(user_id, char_name, new_hp, max_hp)
+        return old_hp, new_hp, max_hp
+
+    async def adjust_max_hp(self, user_id: int, char_name: str, delta: int) -> Tuple[int, int, int, int]:
+        old_cur, old_max = await self.get_hp(user_id, char_name)
+        new_max = max(1, old_max + int(delta))
+        actual_delta = new_max - old_max
+        if actual_delta > 0:
+            new_cur = min(new_max, old_cur + actual_delta)
+        else:
+            new_cur = min(old_cur, new_max)
+        await self.set_hp(user_id, char_name, new_cur, new_max)
+        return old_cur, old_max, new_cur, new_max
+
+    async def set_max_hp_value(self, user_id: int, char_name: str, target_max: int) -> Tuple[int, int, int, int]:
+        old_cur, old_max = await self.get_hp(user_id, char_name)
+        delta = max(1, int(target_max)) - old_max
+        return await self.adjust_max_hp(user_id, char_name, delta)
+
+    async def recover_hp(self, user_id: int, char_name: str, roll_total: int, has_unwounded_dice: bool) -> Tuple[int, int, int]:
+        old_hp, max_hp = await self.get_hp(user_id, char_name)
+        if not has_unwounded_dice:
+            new_hp = min(max_hp, old_hp + 1)
+        elif old_hp <= 0:
+            new_hp = min(max_hp, max(0, int(roll_total)))
+        else:
+            new_hp = min(max_hp, old_hp + max(0, int(roll_total)))
+        await self.set_hp(user_id, char_name, new_hp, max_hp)
+        return old_hp, new_hp, max_hp
+
+    @staticmethod
+    def get_potential_hp_bracket(max_hp: int) -> dict:
+        """Returns PDF Page 18 Potential HP increase bracket info based on current Max HP."""
+        if max_hp < 20:
+            return {
+                "bracket": "10–19 (or <10)",
+                "flat_gain": 5,
+                "can_roll": True,
+                "roll_label": "1d6 + 1",
+                "roll_mod": 1
+            }
+        elif max_hp < 40:
+            return {
+                "bracket": "20–39",
+                "flat_gain": 3,
+                "can_roll": True,
+                "roll_label": "1d6",
+                "roll_mod": 0
+            }
+        elif max_hp < 60:
+            return {
+                "bracket": "40–59",
+                "flat_gain": 2,
+                "can_roll": True,
+                "roll_label": "1d6 - 1",
+                "roll_mod": -1
+            }
+        else:
+            return {
+                "bracket": "60+",
+                "flat_gain": 1,
+                "can_roll": False,
+                "roll_label": "N/A (60+ Max HP)",
+                "roll_mod": 0
+            }
+
 

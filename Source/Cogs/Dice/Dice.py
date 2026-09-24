@@ -477,7 +477,6 @@ class Dice(commands.Cog):
 
     @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
     async def help_command(self, interaction: discord.Interaction):
-        # Page 1: Character Management
         page1 = discord.ui.Container(
             discord.ui.TextDisplay(content="## 📜 **Sentiment Guide: Characters & Setup**"),
             discord.ui.Separator(),
@@ -496,7 +495,6 @@ class Dice(commands.Cog):
             accent_color=discord.Color.random()
         )
 
-        # Page 2: Rolls
         page2 = discord.ui.Container(
             discord.ui.TextDisplay(content="## 🎲 **Sentiment Guide: Core Rolls**"),
             discord.ui.Separator(),
@@ -519,7 +517,6 @@ class Dice(commands.Cog):
             accent_color=discord.Color.random()
         )
 
-        # Page 3: Health (HP), Damage & Leveling Up
         page3 = discord.ui.Container(
             discord.ui.TextDisplay(content="## ❤️ **Sentiment Guide: Health (HP) & Leveling**"),
             discord.ui.Separator(),
@@ -542,7 +539,6 @@ class Dice(commands.Cog):
             accent_color=discord.Color.random()
         )
 
-        # Page 4: Dice States & Support
         page4 = discord.ui.Container(
             discord.ui.TextDisplay(content="## 🔒 **Sentiment Guide: Dice States & Support**"),
             discord.ui.Separator(),
@@ -562,7 +558,6 @@ class Dice(commands.Cog):
             accent_color=discord.Color.random()
         )
 
-        # Page 5: GM & Situational Rules
         page5 = discord.ui.Container(
             discord.ui.TextDisplay(content="## ⚖️ **Sentiment Guide: GM & Combat Reference**"),
             discord.ui.Separator(),

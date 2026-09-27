@@ -1434,15 +1434,6 @@ class RollToDyeView(discord.ui.LayoutView):
         except discord.HTTPException:
             await interaction.response.send_message(view=self)
 
-        if interaction.guild and role_res and role_res.get("is_owner"):
-            try:
-                await interaction.followup.send(
-                    f"ℹ️ **Swing Set to {chosen_color}!**\n> ⚠️ *Notice: You are the **Server Owner**. Discord security rules prevent any bot from modifying the roles of the Server Owner. For other players in the server, their chat name color updates automatically.*",
-                    ephemeral=True
-                )
-            except Exception:
-                pass
-
     async def apply_support_die(self, interaction: discord.Interaction):
         if not self.pending_support:
             await interaction.response.send_message("❌ No support dice available to apply.", ephemeral=True)
@@ -1669,15 +1660,6 @@ class RollToRecoverView(discord.ui.LayoutView):
             await interaction.response.edit_message(view=self)
         except discord.HTTPException:
             await interaction.response.send_message(view=self)
-
-        if interaction.guild and role_res and role_res.get("is_owner"):
-            try:
-                await interaction.followup.send(
-                    f"ℹ️ **Swing Set to {chosen_color}!**\n> ⚠️ *Notice: You are the **Server Owner**. Discord security rules prevent any bot from modifying the roles of the Server Owner. For other players in the server, their chat name color updates automatically.*",
-                    ephemeral=True
-                )
-            except Exception:
-                pass
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

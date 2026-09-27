@@ -156,9 +156,9 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
     """
     Assigns the color role matching chosen_color to the member, and strips any other color roles they hold.
     Returns a dictionary with execution status and details:
-    {'success': bool, 'role': Optional[Role], 'is_owner': bool, 'error': Optional[str]}
+    {'success': bool, 'role': Optional[Role], 'error': Optional[str]}
     """
-    result = {"success": False, "role": None, "is_owner": False, "error": None}
+    result = {"success": False, "role": None, "error": None}
 
     if not guild:
         result["error"] = "no_guild"
@@ -169,9 +169,6 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
     if not member:
         result["error"] = "member_not_found"
         return result
-
-    if member.id == actual_guild.owner_id:
-        result["is_owner"] = True
 
     bot_member = await get_bot_member(bot, actual_guild)
     if not bot_member:
@@ -219,12 +216,8 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
             await member.add_roles(target_role, reason=f"Sentiment swing set to {chosen_color}")
             result["success"] = True
         except discord.Forbidden as e:
-            if result["is_owner"]:
-                result["error"] = "forbidden_server_owner"
-                logger.info(f"Cannot assign role to Server Owner {member.display_name} due to Discord API restrictions.")
-            else:
-                result["error"] = "forbidden_hierarchy"
-                logger.warning(f"Discord Forbidden assigning {target_role.name} to {member.display_name}: {e}")
+            result["error"] = "forbidden_hierarchy"
+            logger.warning(f"Discord Forbidden assigning {target_role.name} to {member.display_name}: {e}")
         except Exception as e:
             result["error"] = str(e)
             logger.warning(f"Failed to add role {target_role.name} to {member.display_name}: {e}")
@@ -288,7 +281,7 @@ async def sync_member_swing_color_role(bot, guild: discord.Guild, user_id: int, 
             return await assign_swing_color_role(bot, actual_guild, member, db_manager, swing[0])
 
     await remove_swing_color_roles(bot, actual_guild, member, db_manager)
-    return {"success": True, "role": None, "is_owner": (member.id == actual_guild.owner_id), "error": None}
+    return {"success": True, "role": None, "error": None}
 
 
 async def auto_setup_all_color_roles(guild: discord.Guild, db_manager, bot=None) -> Dict[str, Optional[discord.Role]]:
@@ -306,10 +299,10 @@ async def auto_setup_all_color_roles(guild: discord.Guild, db_manager, bot=None)
 async def sync_all_server_members(bot, guild: discord.Guild, db_manager) -> Dict[str, int]:
     """
     Syncs swing color roles for all players in the server who have an active character.
-    Returns stats: {'synced': count, 'colorless': count, 'skipped_owner': count}
+    Returns stats: {'synced': count, 'colorless': count}
     """
     actual_guild = (bot.get_guild(guild.id) if bot else None) or guild
-    stats = {"synced": 0, "colorless": 0, "skipped_owner": 0}
+    stats = {"synced": 0, "colorless": 0}
 
     # Query all users with selected characters
     async with db_manager.db_lock:
@@ -319,11 +312,10 @@ async def sync_all_server_members(bot, guild: discord.Guild, db_manager) -> Dict
     for user_id, char_name in rows:
         member = actual_guild.get_member(user_id)
         if not member:
-            continue
-
-        if member.id == actual_guild.owner_id:
-            stats["skipped_owner"] += 1
-            continue
+            try:
+                member = await actual_guild.fetch_member(user_id)
+            except Exception:
+                continue
 
         swing = await db_manager.get_swing(user_id, char_name)
         if swing and swing[0]:
@@ -431,7 +423,6 @@ class SyncMyRoleButton(discord.ui.Button):
             return
 
         actual_guild = self.view.bot.get_guild(interaction.guild.id) or interaction.guild
-        is_owner = (actual_guild.owner_id == interaction.user.id)
 
         active_char = await self.view.db_manager.get_selected_char(interaction.user.id)
         if not active_char:
@@ -461,15 +452,7 @@ class SyncMyRoleButton(discord.ui.Button):
             chosen_color
         )
 
-        if is_owner:
-            await interaction.response.send_message(
-                f"ℹ️ Your active character *{active_char}* is set to **{emoji} {chosen_color}** Swing.\n\n"
-                f"> ⚠️ **Discord Server Owner Notice:**\n"
-                f"> You are the **Server Owner** (`{interaction.user.display_name}`). Discord's internal security system strictly prevents any bot from modifying the roles of the Server Owner.\n"
-                f"> **To test automatic swing color role assignment in action, have another player choose a swing, or test with a secondary account!**",
-                ephemeral=True
-            )
-        elif sync_result.get("success"):
+        if sync_result.get("success"):
             target_role = sync_result.get("role")
             role_mention = target_role.mention if target_role else f"@{chosen_color}"
             await interaction.response.send_message(
@@ -499,11 +482,10 @@ class SyncAllPlayersButton(discord.ui.Button):
 
         await interaction.response.defer(ephemeral=True)
         stats = await sync_all_server_members(self.view.bot, interaction.guild, self.view.db_manager)
-        owner_note = f" (Skipped Server Owner due to Discord permissions policy)" if stats['skipped_owner'] > 0 else ""
         await interaction.followup.send(
             f"✅ **Player Sync Complete!**\n"
             f"• Updated **{stats['synced']}** player(s) with active swings.\n"
-            f"• Cleared roles for **{stats['colorless']}** player(s) without swings.{owner_note}",
+            f"• Cleared roles for **{stats['colorless']}** player(s) without swings.",
             ephemeral=True
         )
 

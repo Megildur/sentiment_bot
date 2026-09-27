@@ -1,50 +1,88 @@
-# 🎲 Sentiment TTRPG Discord Bot
+# 🎲 Sentiment
 
-[![Release](https://img.shields.io/badge/release-v1.0.0-blue.svg)](https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.0)
-[![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
-[![discord.py](https://img.shields.io/badge/discord.py-2.7%2B-blueviolet.svg)](https://github.com/Rapptz/discord.py)
-[![Database](https://img.shields.io/badge/database-SQLite%20(aiosqlite)-orange.svg)](https://sqlite.org/)
+<p align="center">
+  <a href="https://discord.com/oauth2/authorize?client_id=1547381359968784405&permissions=268815424&scope=bot+applications.commands&integration_type=0">
+    <img src="https://img.shields.io/badge/Invite%20Bot-Discord%20App-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Invite Bot" />
+  </a>
+  &nbsp;
+  <a href="https://discord.gg/Hr595Zk2tr">
+    <img src="https://img.shields.io/badge/Support%20Server-Join%20Community-57F287?style=for-the-badge&logo=discord&logoColor=white" alt="Support Server" />
+  </a>
+  &nbsp;
+  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.0">
+    <img src="https://img.shields.io/badge/Release-v1.0.0-blue?style=for-the-badge" alt="Release v1.0.0" />
+  </a>
+</p>
 
 A dedicated Discord companion bot for the **Sentiment Tabletop Roleplaying Game (TTRPG)**. The bot manages character creation, dynamic attribute dice, core roll mechanics (*Roll to Dye*, *Roll to Do*, *Roll to Recover*), health and leveling brackets, dice states (*Wounded*, *Locked*, *Support*), Game Master NPC tagging, and **Dynamic Swing Color Roles** that change chat username colors to match player swings in real time.
 
 ---
 
-## 🌟 What's New in v1.0.0: Swing Color Roles & Chat Name Colors
+## 🔗 Quick Links & Invites
 
-In the Sentiment TTRPG, your character's active **Swing** represents your current emotional alignment and color affinity. In **v1.0.0**, this comes alive in Discord!
+| Link | Description | URL |
+| :--- | :--- | :--- |
+| 🤖 **Invite Sentiment Bot** | Add the bot directly to your Discord server | [**Add Bot to Server**](https://discord.com/oauth2/authorize?client_id=1547381359968784405&permissions=268815424&scope=bot+applications.commands&integration_type=0) |
+| 💬 **Discord Support Server** | Get help, report bugs, and suggest features | [**Join Community Server**](https://discord.gg/Hr595Zk2tr) |
+| 📦 **GitHub Repository** | View source code and release notes | [**Megildur/sentiment_bot**](https://github.com/Megildur/sentiment_bot) |
 
-* **🎨 Chat Username Color Changes:** When you set a Swing, the bot automatically grants you the corresponding Discord color role. Your username in chat and the server member list dynamically changes to match your Swing's exact accent color!
-* **10 Accent Colors Supported:**
-  * 🔴 **Red** (`#E74C3C`)
-  * 🟡 **Yellow** (`#F1C40F`)
-  * 🟢 **Green** (`#2ECC71`)
-  * 🔵 **Blue** (`#3498DB`)
-  * 🟣 **Purple** (`#9B59B6`)
-  * 🟠 **Orange** (`#E67E22`)
-  * 🔘 **Grey** (`#979C9F`)
-  * ⚫ **Black** (`#2D2D2D`)
-  * ⚪ **White** (`#F5F5F5`)
-  * 💎 **Clear** (`#1ABC9C`)
-* **Automatic Role Assignment & Removal:**
-  * Setting a Swing via `/roll_to_dye` or `/roll_to_recover` gives you the matching role and strips any previous color roles.
-  * Dropping your Swing (`/drop_swing`), locking or wounding your active swing die, or switching characters automatically removes the color role so you return to your normal server name color.
-* **Auto-Search & Auto-Creation:** If the color roles already exist on your server (by name), the bot automatically finds and links them. If they do not exist, the bot creates them automatically with the exact accent colors.
-* **Interactive `/color_roles` Menu:** Server administrators and GMs can view current role bindings, customize roles with Discord's native `RoleSelect` menu, trigger 1-click **⚡ Auto-Setup All Roles**, run **🔄 Sync My Role**, or run **👥 Sync All Players** to update all server members.
+---
+
+## ✨ Key Features
+
+- **🎨 Dynamic Swing Color Roles & Chat Name Colors (New in v1.0.0)**:
+  - **Dynamic Name Color:** When a player chooses an active Swing, the bot automatically grants the matching Discord color role, immediately changing their chat and member list username color to match their Swing's accent color!
+  - **10 Accent Colors Supported:**
+    - 🔴 **Red** (`#E74C3C`)
+    - 🟡 **Yellow** (`#F1C40F`)
+    - 🟢 **Green** (`#2ECC71`)
+    - 🔵 **Blue** (`#3498DB`)
+    - 🟣 **Purple** (`#9B59B6`)
+    - 🟠 **Orange** (`#E67E22`)
+    - 🔘 **Grey** (`#979C9F`)
+    - ⚫ **Black** (`#2D2D2D`)
+    - ⚪ **White** (`#F5F5F5`)
+    - 💎 **Clear** (`#1ABC9C`)
+  - **Automatic Grant & Removal:** Setting a Swing via `/roll_to_dye` or `/roll_to_recover` gives the role; dropping a swing (`/drop_swing`, locking/wounding the die, or switching characters) immediately removes the role to return to normal server colors.
+  - **Auto-Search & Auto-Creation:** Searches for existing roles by name or automatically creates them with their exact accent colors if they don't exist yet.
+  - **Interactive Management Menu (`/color_roles`)**: View mappings, customize with Discord's native `RoleSelect`, run 1-click **⚡ Auto-Setup Roles**, **🔄 Sync My Role**, or **👥 Sync All Players** across the campaign.
+- **🎭 Character & Attribute System (`/set_attributes`, `/character_card`)**:
+  - Support for multiple characters per user with autocomplete switching (`/change_active_character`).
+  - Configure attribute levels (+0 to +9) and custom titles (e.g. Red *"Passion"*, Blue *"Focus"*).
+  - Interactive `/character_card` displaying HP, active Swing, attributes, locked dice, and wounded dice.
+- **🎲 Core Sentiment Rolls**:
+  - **`/roll_to_dye`**: Defensive roll rolling 1d6 for all unwounded, unlocked attributes while preserving active Swing. Includes interactive **Set Swing** and **Apply Support Die** buttons.
+  - **`/roll_to_do`**: Proactive action roll. Rolls **1d20 + Swing** (die + bonus) with Criticals on natural 20s, or **1d20 + 1d6 Wild** if colorless.
+  - **`/roll_to_recover`**: Rest roll that automatically restores HP according to official Sentiment recovery rules, unlocks all dice, and allows setting a new Swing.
+  - **`/roll_wild`**: Roll a standalone 1d6 die.
+- **❤️ Health (HP) & Leveling Brackets (`/hp`)**:
+  - Per-character Current and Max HP tracking (defaults to 10/10 HP).
+  - Damage (`/hp damage`) with 0 HP Wounded reminders and Death / Leave Scene alerts.
+  - Healing (`/hp heal`) up to Max HP.
+  - Manage Max HP submenu (`/hp max` or character card button) with PDF Page 18 Potential level-up brackets (flat increase or 1d6 roll) and custom adjustments.
+- **🔒 Dice States & Support System**:
+  - **Locking & Unlocking (`/lock_die`, `/unlock_die`)**: Lock dice for Sprinting, Pushing, or Blocking. Locking your active swing die automatically drops it.
+  - **Wounding & Healing (`/wound_die`, `/unwound_die`)**: Wounding an attribute die automatically unlocks all locked dice.
+  - **Support Die (`/support`)**: Share an attribute die with an ally. When consumed in their roll, it returns to the donor locked.
+- **⚖️ Game Master (GM) & Combat Tools**:
+  - Set server Game Master (`/set_gm`).
+  - GM can mark characters as NPCs (`(NPC)`).
+  - Clashing rules when opponents have matching swing colors.
 
 ---
 
 ## ⚙️ Important: Discord Role Hierarchy Setup
 
-For Discord to display your username in your Swing's color, Discord's role hierarchy rules must be followed:
+For Discord to display a player's username in their Swing's color, Discord's role hierarchy rules must be followed:
 
 > ⚠️ **Discord Hierarchy Rule:** A member's username color in chat and the member list is determined strictly by their **highest role that has a color assigned**.
 
 ### How to Configure Roles in Your Server:
 1. Open **Server Settings ➔ Roles**.
-2. **Move the Bot's Role to the Top:** Ensure the bot has a custom role (e.g. `Sentiment Bot`) positioned higher than the color roles with the **Manage Roles** permission enabled.
+2. **Position the Bot's Role Above Color Roles:** Ensure the bot has a role (e.g. `Sentiment Bot`) positioned higher than all color roles, with the **Manage Roles** permission enabled.
 3. **Move Color Roles to the Top:** Drag all 10 Color Roles (Red, Yellow, Green, etc.) directly below the bot's role.
 4. **Keep Other Colored Roles Lower:** Ensure members do not have other roles placed above the color roles that also have a custom color set (e.g. general member roles should have "Default" color, or be placed below the color roles).
-5. **Note on Server Owners:** Discord's internal security policy strictly prevents any bot from modifying the roles of the **Server Owner**. To test automatic role changes in action, test with another server member or a secondary account!
+5. **Note on Server Owners:** Discord's internal security policy strictly prevents any bot from modifying the roles of the **Server Owner**. To test automatic role changes in action, test with another server member or a secondary test account!
 
 ```
 Server Role Hierarchy Example:
@@ -69,97 +107,113 @@ Server Role Hierarchy Example:
 
 ---
 
-## 📖 Command Reference
+## 📋 Slash Commands Reference
 
-### Character Management
-| Command | Description |
-| :--- | :--- |
-| `/set_attributes` | Create a new character (starts at 10/10 HP) or configure attributes, bonus values (+0 to +9), and custom titles. |
-| `/change_active_character <name>` | Quickly switch which character you are actively playing. |
-| `/character_card` | View your full character sheet: Current/Max HP, active Swing, attributes, locked dice, and wounded dice. |
-
-### Core Rolls
-| Command | Description |
-| :--- | :--- |
-| `/roll_to_dye` | Defensive/reactive roll. Rolls 1d6 for all unwounded, unlocked attributes. Preserves active Swing die. Includes buttons to **Set Swing** and **Apply Support Die**. |
-| `/roll_to_do` | Proactive roll (attacks, skill checks). Rolls **1d20 + Swing** (die value + bonus). Rolling 20 on the d20 is a Critical. Rolls **1d20 + 1d6 Wild** if colorless. |
-| `/roll_to_recover` | Rest & recovery roll. Automatically unlocks all locked dice, recovers HP according to Sentiment rules, and includes a **Set Swing** button. |
-| `/roll_wild` | Roll a standalone 1d6 die. |
-
-### Health (HP) & Leveling
-| Command | Description |
-| :--- | :--- |
-| `/hp damage <amount>` | Deduct HP from your active character. Hitting `0 HP` triggers a Wound & Recovery prompt; hitting `0 HP` with all dice wounded triggers a Death / Leave Scene alert. |
-| `/hp heal <amount>` | Restores HP up to your character's Max HP. |
-| `/hp max` | Opens the Max HP submenu: spend Potential to increase Max HP using Sentiment PDF Page 18 brackets (flat or rolled 1d6) or set custom Max HP. |
-
-### Dice States & Support
-| Command | Description |
-| :--- | :--- |
-| `/drop_swing` | Drop your active Swing to become colorless. Automatically removes your swing color role. |
-| `/lock_die` | Lock an available attribute die (for Sprinting, Pushing, Blocking). Locking your active swing die drops it. |
-| `/unlock_die` | Manually unlock a locked attribute die. |
-| `/wound_die` | Wound an attribute die when sustaining severe trauma. Automatically unlocks all locked dice. |
-| `/unwound_die` | Heal a wounded die after medical treatment or between sessions. |
-| `/support <user>` | Pass an attribute die to an ally. When applied in their roll, it returns to you locked. |
-
-### Server & GM Administration
-| Command | Description |
-| :--- | :--- |
-| `/color_roles` | Open the interactive configuration menu to view, customize, auto-create, or sync Swing Color Roles. |
-| `/set_gm <user>` | Designate or transfer the Game Master for the server. The GM can tag characters as NPCs (`(NPC)`). |
-| `/help` | Comprehensive 6-page interactive paginator covering character setup, core rolls, health, dice states, color roles, and combat reference. |
+| Command | Scope | Description |
+| :--- | :--- | :--- |
+| `/help` | Everyone | Comprehensive 6-page interactive paginator covering character setup, core rolls, health, dice states, color roles, and combat rules. |
+| `/set_attributes` | Everyone | Create a character (starts at 10/10 HP) or configure attributes, bonus values (+0 to +9), and custom titles. |
+| `/change_active_character <name>` | Everyone | Quickly switch which character you are actively playing with autocomplete. |
+| `/character_card` | Everyone | View full character sheet: Current/Max HP, active Swing, attributes, locked dice, and wounded dice. |
+| `/roll_to_dye` | Everyone | Defensive/reactive roll. Rolls 1d6 for all unwounded, unlocked attributes. Includes **Set Swing** and **Apply Support Die** buttons. |
+| `/roll_to_do` | Everyone | Proactive roll (attacks, skill checks). Rolls **1d20 + Swing** (die + bonus) or **1d20 + 1d6 Wild** if colorless. |
+| `/roll_to_recover` | Everyone | Rest & recovery roll. Automatically unlocks locked dice, recovers HP according to Sentiment rules, and includes **Set Swing**. |
+| `/roll_wild` | Everyone | Roll a standalone 1d6 die. |
+| `/hp damage <amount>` | Everyone | Deduct HP from your active character. Hitting 0 HP prompts a Wound alert; all dice wounded at 0 HP triggers Death/Leave Scene alert. |
+| `/hp heal <amount>` | Everyone | Restores HP up to your character's Max HP. |
+| `/hp max` | Everyone | Opens the Max HP submenu: spend Potential to increase Max HP using Sentiment PDF Page 18 brackets or set custom Max HP. |
+| `/drop_swing` | Everyone | Drop active Swing to become colorless. Automatically removes your swing color role. |
+| `/lock_die` | Everyone | Lock an available attribute die (for Sprinting, Pushing, Blocking). Locking your active swing die drops it. |
+| `/unlock_die` | Everyone | Manually unlock a locked attribute die. |
+| `/wound_die` | Everyone | Wound an attribute die when sustaining severe trauma. Automatically unlocks all locked dice. |
+| `/unwound_die` | Everyone | Heal a wounded die after medical treatment or between sessions. |
+| `/support <user>` | Everyone | Pass an attribute die to an ally. When applied in their roll, it returns to you locked. |
+| `/color_roles` | Everyone / Admins | Open the interactive configuration menu to view, customize, auto-create, or sync Swing Color Roles. |
+| `/set_gm <user>` | Admins / GM | Designate or transfer the Game Master for the server. The GM can tag characters as NPCs (`(NPC)`). |
 
 ---
 
-## 🚀 Setup & Installation
+## 🚀 Setup & Self-Hosting
 
 ### Prerequisites
-* **Python 3.10+** (Tested up to Python 3.14)
-* **Discord Bot Token** with the following Privileged Gateway Intents enabled in the [Discord Developer Portal](https://discord.com/developers/applications):
-  * **Server Members Intent**
-  * **Message Content Intent**
+- Python 3.10+ (Tested up to Python 3.14)
+- A registered [Discord Bot Application](https://discord.com/developers/applications) with:
+  - **Message Content Intent** enabled
+  - **Server Members Intent** enabled
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/Megildur/sentiment_bot.git
-cd sentiment_bot
-```
+### Installation
 
-### 2. Configure Environment Variables
-Create a `.env` file in the root directory:
-```env
-API_TOKEN=your_discord_bot_token_here
-ALLOWED_GUILDS=123456789012345678,987654321098765432
-```
-* `API_TOKEN`: Your Discord Bot token.
-* `ALLOWED_GUILDS`: Comma-separated list of server IDs where owner sync commands are permitted.
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Megildur/sentiment_bot.git
+   cd sentiment_bot
+   ```
 
-### 3. Install Dependencies
-```bash
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
+2. **Set up a virtual environment**:
+   ```bash
+   python -m venv venv
+   # Windows:
+   .\venv\Scripts\activate
+   # Linux/macOS:
+   source venv/bin/activate
+   ```
 
-pip install -r requirements.txt
-```
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 4. Run the Bot
-On Windows PowerShell:
-```powershell
-.\start.ps1
-```
-Or directly with Python:
-```bash
-python Main.py
-```
+4. **Environment Variables**:
+   Create a `.env` file in the root directory:
+   ```env
+   # Discord Bot Application Token
+   API_TOKEN=your_bot_token_here
 
-### 5. Sync Slash Commands
-To register all slash commands with Discord:
-* Use the owner prefix command in Discord: `!b quicksync`
-* Or use `/owner sync Global` (or `/owner sync Guild`) from an authorized server.
+   # Support server invite link
+   BOT_SERVER=https://discord.gg/Hr595Zk2tr
+
+   # Comma-separated Discord guild IDs authorized for owner/admin commands
+   ALLOWED_GUILDS=123456789012345678,987654321098765432
+   ```
+
+5. **Run the bot**:
+   On Windows PowerShell:
+   ```powershell
+   .\start.ps1
+   ```
+   Or directly with Python:
+   ```bash
+   python Main.py
+   ```
+
+6. **Add Bot to Server**:
+   - In the [Discord Developer Portal](https://discord.com/developers/applications), navigate to **OAuth2** -> **URL Generator**:
+     - **Scopes**:
+       - `bot`
+       - `applications.commands`
+     - **Bot Permissions** (Permission Integer: `268815424`):
+       - `Manage Roles`
+       - `View Channels`
+       - `Send Messages`
+       - `Embed Links`
+       - `Attach Files`
+       - `Read Message History`
+       - `Use External Emojis`
+       - `Add Reactions`
+   - Use the generated invite URL to add the bot to your server:
+     ```text
+     https://discord.com/oauth2/authorize?client_id=1547381359968784405&permissions=268815424&scope=bot+applications.commands&integration_type=0
+     ```
+
+7. **Sync Slash Commands**:
+   - In any server listed in your `ALLOWED_GUILDS`, run the quicksync command:
+     ```text
+     !b quicksync
+     ```
+   - Or run the slash command:
+     ```text
+     /owner sync sync_type:Guild
+     ```
 
 ---
 
@@ -192,5 +246,8 @@ sentiment/
 
 ---
 
-## 📄 License
-This project is developed for the Sentiment TTRPG community. Check with the repository maintainer for licensing details.
+## 🛡️ Support & Community
+
+Need assistance, found an issue, or want to suggest new features?
+- **Join our Discord**: [https://discord.gg/Hr595Zk2tr](https://discord.gg/Hr595Zk2tr)
+- **Invite Sentiment Bot**: [https://discord.com/oauth2/authorize?client_id=1547381359968784405&permissions=268815424&scope=bot+applications.commands&integration_type=0](https://discord.com/oauth2/authorize?client_id=1547381359968784405&permissions=268815424&scope=bot+applications.commands&integration_type=0)

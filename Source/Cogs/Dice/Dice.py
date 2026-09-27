@@ -248,19 +248,21 @@ class Dice(commands.Cog):
     @app_commands.command(name="change_active_character", description="Switch your active character")
     @app_commands.autocomplete(characters=characters_autocomplete)
     async def change_active_character(self, interaction: discord.Interaction, characters: str):
+        await interaction.response.defer(ephemeral=True)
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
         if characters not in all_chars:
             view = NoticeView("❌ Character Not Found", f"You do not own a character named **{characters}**.")
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await interaction.followup.send(view=view, ephemeral=True)
             return
             
         await self.db_manager.set_selected_char(interaction.user.id, characters)
-        if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+        guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
+        if guild:
+            await sync_member_swing_color_role(self.bot, guild, interaction.user.id, self.db_manager)
         char_color = await self._get_char_color(interaction.user.id, characters)
         view = NoticeView("✅ Active Character Changed", f"Your active character has been changed to **{characters}**.", color=char_color)
-        await interaction.response.send_message(view=view, ephemeral=True)
+        await interaction.followup.send(view=view, ephemeral=True)
 
     @app_commands.command(name="roll_wild", description="Roll a standalone 1d6")
     async def roll_wild(self, interaction: discord.Interaction):
@@ -380,6 +382,7 @@ class Dice(commands.Cog):
 
     @app_commands.command(name="drop_swing", description="Drop your character's current active swing die")
     async def drop_swing(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -389,7 +392,7 @@ class Dice(commands.Cog):
 
         if not swing:
             view = NoticeView("ℹ️ No Swing Set", f"**{display_name}** does not currently have an active swing set.", color=discord.Color.random())
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await interaction.followup.send(view=view, ephemeral=True)
             return
 
         await self.db_manager.drop_swing(interaction.user.id, active_char)
@@ -397,7 +400,7 @@ class Dice(commands.Cog):
         if guild:
             await remove_swing_color_roles(self.bot, guild, interaction.user.id, self.db_manager)
         view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="support", description="Share an attribute die to support an ally's roll")
     @app_commands.describe(user="The ally you want to support with a die")
@@ -485,8 +488,9 @@ class Dice(commands.Cog):
     @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
     @app_commands.guild_only()
     async def color_roles(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         view = await ColorRolesConfigView.build(self.bot, interaction.guild, self.db_manager)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
     async def help_command(self, interaction: discord.Interaction):

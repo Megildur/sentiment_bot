@@ -113,6 +113,14 @@ class DiceDatabase():
             INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp)
             SELECT DISTINCT user_id, char_name, 10, 10 FROM attributes
         ''')
+        await self.db.execute('''
+            CREATE TABLE IF NOT EXISTS guild_color_roles (
+                guild_id INTEGER,
+                color TEXT,
+                role_id INTEGER,
+                PRIMARY KEY (guild_id, color)
+            )
+        ''')
         await self.db.commit()
 
     async def set_gm_check(self, interaction, user_id: int):
@@ -558,5 +566,49 @@ class DiceDatabase():
                 "roll_label": "N/A (60+ Max HP)",
                 "roll_mod": 0
             }
+
+    # --- Guild Color Roles Helpers ---
+    async def get_guild_color_roles(self, guild_id: int) -> dict[str, int]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT color, role_id FROM guild_color_roles WHERE guild_id = ?",
+                (guild_id,)
+            )
+            rows = await cursor.fetchall()
+            return {row[0]: row[1] for row in rows} if rows else {}
+
+    async def get_guild_color_role(self, guild_id: int, color: str) -> Optional[int]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT role_id FROM guild_color_roles WHERE guild_id = ? AND color = ?",
+                (guild_id, color)
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_guild_color_role(self, guild_id: int, color: str, role_id: int):
+        async with self.db_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO guild_color_roles (guild_id, color, role_id) VALUES (?, ?, ?)",
+                (guild_id, color, role_id)
+            )
+            await self.db.commit()
+
+    async def delete_guild_color_role(self, guild_id: int, color: str):
+        async with self.db_lock:
+            await self.db.execute(
+                "DELETE FROM guild_color_roles WHERE guild_id = ? AND color = ?",
+                (guild_id, color)
+            )
+            await self.db.commit()
+
+    async def clear_guild_color_roles(self, guild_id: int):
+        async with self.db_lock:
+            await self.db.execute(
+                "DELETE FROM guild_color_roles WHERE guild_id = ?",
+                (guild_id,)
+            )
+            await self.db.commit()
+
 
 

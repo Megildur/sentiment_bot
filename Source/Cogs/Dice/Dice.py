@@ -22,7 +22,9 @@ from .Views import (
     RollToDoView,
     RollToRecoverView,
     get_swing_accent_color,
+    ColorRolesConfigView,
 )
+from .ColorRoles import remove_swing_color_roles, sync_member_swing_color_role
 from Source.Utils.Paginator import ButtonPaginator
 
 class Dice(commands.Cog):
@@ -254,6 +256,8 @@ class Dice(commands.Cog):
             return
             
         await self.db_manager.set_selected_char(interaction.user.id, characters)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         char_color = await self._get_char_color(interaction.user.id, characters)
         view = NoticeView("✅ Active Character Changed", f"Your active character has been changed to **{characters}**.", color=char_color)
         await interaction.response.send_message(view=view, ephemeral=True)
@@ -389,6 +393,8 @@ class Dice(commands.Cog):
             return
 
         await self.db_manager.drop_swing(interaction.user.id, active_char)
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            await remove_swing_color_roles(self.bot, interaction.guild, interaction.user, self.db_manager)
         view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
         await interaction.response.send_message(view=view)
 
@@ -475,6 +481,12 @@ class Dice(commands.Cog):
         view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
         await interaction.response.send_message(view=view)
 
+    @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
+    @app_commands.guild_only()
+    async def color_roles(self, interaction: discord.Interaction):
+        view = await ColorRolesConfigView.build(self.bot, interaction.guild, self.db_manager)
+        await interaction.response.send_message(view=view)
+
     @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
     async def help_command(self, interaction: discord.Interaction):
         page1 = discord.ui.Container(
@@ -551,7 +563,8 @@ class Dice(commands.Cog):
                 "• Lock an unwounded die to use abilities (Sprint, Push, Block, Tag a Prop). Locking your Swing drops it.\n"
                 "• Locked dice unlock at the start of your turn, end of a Scene, or when you `/roll_to_recover`.\n\n"
                 "**`/drop_swing`**\n"
-                "• Drop your active Swing to become colorless.\n\n"
+                "• Drop your active Swing to become colorless.\n"
+                "• Automatically removes your swing color role so your chat name reverts to normal.\n\n"
                 "**`/support`**\n"
                 "• Pass an available attribute die to an ally (`+1d6` button on their next roll). Returns to you **locked** after use."
             ),
@@ -559,6 +572,28 @@ class Dice(commands.Cog):
         )
 
         page5 = discord.ui.Container(
+            discord.ui.TextDisplay(content="## 🎨 **Sentiment Guide: Swing Color Roles & Name Colors**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=
+                "**Dynamic Swing Color Roles**\n"
+                "• Setting a Swing in `/roll_to_dye` or `/roll_to_recover` automatically assigns the matching Discord color role.\n"
+                "• Changes your username color in chat and the member list to match your active Swing's accent color (all 10 Sentiment colors supported).\n"
+                "• Dropping your Swing (`/drop_swing`, locking/wounding the swing die, or switching characters) immediately removes the role.\n\n"
+                "**`/color_roles` Command**\n"
+                "• Interactive server management menu with dropdowns and buttons to manage color roles.\n"
+                "• **⚡ Auto-Setup:** Searches the server for existing color roles or automatically creates them with their exact accent colors.\n"
+                "• **Role Picker:** Use dropdowns to customize or map custom roles for each color.\n"
+                "• **🔄 Sync My Role:** Instantly syncs your color role to your current character's active swing.\n\n"
+                "⚠️ **CRITICAL: Role Hierarchy Setup for Name Colors**\n"
+                "• In Discord, your chat name color is determined by your **highest role that has a color**.\n"
+                "• **Move all Color Roles to the top** of your server's role hierarchy (Server Settings ➔ Roles), positioned directly below the bot's role.\n"
+                "• Ensure the **Bot's role** is higher than all color roles and has the **Manage Roles** permission enabled.\n"
+                "• Ensure members do not have a colored role above the color roles, or Discord will display that role's color instead!"
+            ),
+            accent_color=discord.Color.gold()
+        )
+
+        page6 = discord.ui.Container(
             discord.ui.TextDisplay(content="## ⚖️ **Sentiment Guide: GM & Combat Reference**"),
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
@@ -575,7 +610,7 @@ class Dice(commands.Cog):
         )
 
         paginator = ButtonPaginator.create_standard_paginator(
-            [page1, page2, page3, page4, page5],
+            [page1, page2, page3, page4, page5, page6],
             author_id=interaction.user.id,
             timeout=300.0
         )

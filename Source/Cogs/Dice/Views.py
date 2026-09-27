@@ -1,23 +1,16 @@
 import discord
 import random
 from typing import Optional
-from .Constants import COLOR_EMOJIS
+from .Constants import COLOR_EMOJIS, COLOR_DISCORD_COLORS, COLOR_ORDER
+from .ColorRoles import (
+    assign_swing_color_role,
+    remove_swing_color_roles,
+    sync_member_swing_color_role,
+    ColorRolesConfigView
+)
 
 MODAL_COLOR_EMOJIS = COLOR_EMOJIS.copy()
 MODAL_COLOR_EMOJIS["Grey"] = "🔘"
-
-COLOR_DISCORD_COLORS = {
-    "Red": discord.Color.red(),
-    "Yellow": discord.Color.gold(),
-    "Green": discord.Color.green(),
-    "Blue": discord.Color.blue(),
-    "Purple": discord.Color.purple(),
-    "Orange": discord.Color.orange(),
-    "Grey": discord.Color.light_grey(),
-    "Black": discord.Color.from_rgb(45, 45, 45),
-    "White": discord.Color.from_rgb(245, 245, 245),
-    "Clear": discord.Color.teal()
-}
 
 def get_swing_accent_color(swing: Optional[tuple] = None) -> discord.Color:
     if swing and swing[0] in COLOR_DISCORD_COLORS:
@@ -142,6 +135,8 @@ class SetValuesModal(discord.ui.Modal, title="Set Attributes and Bonuses"):
         
         await self.db_manager.set_attributes(interaction, char_name, attributes)
         await self.db_manager.set_selected_char(interaction.user.id, char_name)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=char_name, is_new=True)
         
@@ -409,6 +404,8 @@ class DeleteSingleAttributeModal(discord.ui.Modal, title="Delete Attribute"):
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         if not all_chars:
             await self.db_manager.completely_delete_character(interaction.user.id, self.char_name)
+            if interaction.guild:
+                await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
             view = NoCharactersLeftView(self.bot, self.db_manager, deleted_char=self.char_name)
         else:
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, self.char_name, is_new=True)
@@ -446,6 +443,8 @@ class ChangeCharSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
 
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=new_active)
         await interaction.response.edit_message(view=view)
@@ -516,6 +515,8 @@ class ConfirmDeleteButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         await self.db_manager.completely_delete_character(interaction.user.id, self.char_to_delete)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
         if not all_chars:
@@ -556,6 +557,8 @@ class NewActiveCharSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=new_active)
         await interaction.response.edit_message(view=view)
@@ -698,6 +701,8 @@ class ChangeCardCharSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=new_active)
         await interaction.response.edit_message(view=view)
 
@@ -1139,6 +1144,8 @@ class WoundDieModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         chosen_color = self.color_select.values[0]
         await self.db_manager.wound_die(interaction.user.id, self.char_name, chosen_color)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
         await interaction.response.send_message(view=view)
 
@@ -1199,6 +1206,8 @@ class LockDieModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         chosen_color = self.color_select.values[0]
         await self.db_manager.lock_die(interaction.user.id, self.char_name, chosen_color)
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
         await interaction.response.send_message(view=view)
 
@@ -1413,6 +1422,9 @@ class RollToDyeView(discord.ui.LayoutView):
         await self.db_manager.set_swing(self.user_id, self.char_name, chosen_color, matching_die['roll'])
         self.swing_info = (chosen_color, matching_die['roll'], matching_die['bonus'])
 
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            await assign_swing_color_role(self.bot, interaction.guild, interaction.user, self.db_manager, chosen_color)
+
         for d in self.rolled_dice:
             d['is_swing'] = (d['color'] == chosen_color)
 
@@ -1444,6 +1456,8 @@ class RollToDyeView(discord.ui.LayoutView):
             recv_char=self.char_name,
             attribute=item["attribute"]
         )
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager)
 
         self.render_view()
         try:
@@ -1545,6 +1559,8 @@ class RollToDoView(discord.ui.LayoutView):
             recv_char=self.char_name,
             attribute=item["attribute"]
         )
+        if interaction.guild:
+            await sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager)
 
         self.render_view()
         try:
@@ -1635,6 +1651,9 @@ class RollToRecoverView(discord.ui.LayoutView):
 
         await self.db_manager.set_swing(self.user_id, self.char_name, chosen_color, matching_die['roll'])
         self.swing_info = (chosen_color, matching_die['roll'], matching_die['bonus'])
+
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            await assign_swing_color_role(self.bot, interaction.guild, interaction.user, self.db_manager, chosen_color)
 
         self.render_view()
         try:

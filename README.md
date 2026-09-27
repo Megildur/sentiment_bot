@@ -29,7 +29,7 @@ In the Sentiment TTRPG, your character's active **Swing** represents your curren
   * Setting a Swing via `/roll_to_dye` or `/roll_to_recover` gives you the matching role and strips any previous color roles.
   * Dropping your Swing (`/drop_swing`), locking or wounding your active swing die, or switching characters automatically removes the color role so you return to your normal server name color.
 * **Auto-Search & Auto-Creation:** If the color roles already exist on your server (by name), the bot automatically finds and links them. If they do not exist, the bot creates them automatically with the exact accent colors.
-* **Interactive `/color_roles` Menu:** Server administrators and GMs can view current role bindings, customize roles with Discord's native `RoleSelect` menu, trigger 1-click **⚡ Auto-Setup All Roles**, or run **🔄 Sync My Role**.
+* **Interactive `/color_roles` Menu:** Server administrators and GMs can view current role bindings, customize roles with Discord's native `RoleSelect` menu, trigger 1-click **⚡ Auto-Setup All Roles**, run **🔄 Sync My Role**, or run **👥 Sync All Players** to update all server members.
 
 ---
 
@@ -41,9 +41,10 @@ For Discord to display your username in your Swing's color, Discord's role hiera
 
 ### How to Configure Roles in Your Server:
 1. Open **Server Settings ➔ Roles**.
-2. **Move the Bot's Role to the Top:** Ensure the bot's role is positioned higher than the color roles and has the **Manage Roles** permission enabled.
+2. **Move the Bot's Role to the Top:** Ensure the bot has a custom role (e.g. `Sentiment Bot`) positioned higher than the color roles with the **Manage Roles** permission enabled.
 3. **Move Color Roles to the Top:** Drag all 10 Color Roles (Red, Yellow, Green, etc.) directly below the bot's role.
 4. **Keep Other Colored Roles Lower:** Ensure members do not have other roles placed above the color roles that also have a custom color set (e.g. general member roles should have "Default" color, or be placed below the color roles).
+5. **Note on Server Owners:** Discord's internal security policy strictly prevents any bot from modifying the roles of the **Server Owner**. To test automatic role changes in action, test with another server member or a secondary account!
 
 ```
 Server Role Hierarchy Example:

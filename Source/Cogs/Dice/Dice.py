@@ -393,7 +393,7 @@ class Dice(commands.Cog):
             return
 
         await self.db_manager.drop_swing(interaction.user.id, active_char)
-        if interaction.guild and isinstance(interaction.user, discord.Member):
+        if interaction.guild:
             await remove_swing_color_roles(self.bot, interaction.guild, interaction.user, self.db_manager)
         view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
         await interaction.response.send_message(view=view)

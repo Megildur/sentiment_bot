@@ -9,8 +9,8 @@
     <img src="https://img.shields.io/badge/Support%20Server-Join%20Community-57F287?style=for-the-badge&logo=discord&logoColor=white" alt="Support Server" />
   </a>
   &nbsp;
-  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.0">
-    <img src="https://img.shields.io/badge/Release-v1.0.0-blue?style=for-the-badge" alt="Release v1.0.0" />
+  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.1">
+    <img src="https://img.shields.io/badge/Release-v1.0.1-blue?style=for-the-badge" alt="Release v1.0.1" />
   </a>
 </p>
 
@@ -30,7 +30,7 @@ A dedicated Discord companion bot for the **Sentiment Tabletop Roleplaying Game 
 
 ## ✨ Key Features
 
-- **🎨 Dynamic Swing Color Roles & Chat Name Colors (New in v1.0.0)**:
+- **🎨 Dynamic Swing Color Roles & Chat Name Colors (v1.0.1)**:
   - **Dynamic Name Color:** When a player chooses an active Swing, the bot automatically grants the matching Discord color role, immediately changing their chat and member list username color to match their Swing's accent color!
   - **10 Accent Colors Supported:**
     - 🔴 **Red** (`#E74C3C`)

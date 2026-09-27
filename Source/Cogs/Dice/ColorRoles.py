@@ -38,14 +38,20 @@ async def get_bot_member(bot, guild: discord.Guild) -> Optional[discord.Member]:
 
 async def get_guild_member(guild: discord.Guild, user_or_member: Any) -> Optional[discord.Member]:
     """
-    Ensures we have a discord.Member instance in the guild even if a discord.User or ID was passed.
+    Ensures we have a discord.Member instance in the guild even if a discord.User, discord.Member, or int ID was passed.
     """
-    if isinstance(user_or_member, discord.Member):
-        return user_or_member
-
-    user_id = getattr(user_or_member, 'id', None)
-    if not user_id:
+    if not guild or user_or_member is None:
         return None
+
+    if isinstance(user_or_member, int):
+        user_id = user_or_member
+    elif hasattr(user_or_member, 'id'):
+        user_id = user_or_member.id
+    else:
+        try:
+            user_id = int(user_or_member)
+        except (ValueError, TypeError):
+            return None
 
     member = guild.get_member(user_id)
     if not member:
@@ -182,9 +188,10 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
 
     result["role"] = target_role
     all_color_roles = await get_all_guild_color_roles(actual_guild, db_manager, bot=bot)
+    all_color_role_ids = {r.id for r in all_color_roles}
 
     # Roles to remove: any color role the member currently holds except target_role
-    roles_to_remove = [r for r in member.roles if r in all_color_roles and r.id != target_role.id]
+    roles_to_remove = [r for r in member.roles if r.id in all_color_role_ids and r.id != target_role.id]
 
     bot_top_pos = getattr(bot_member.top_role, 'position', 0)
     has_perm = bot_member.guild_permissions.manage_roles or bot_member.guild_permissions.administrator
@@ -211,7 +218,8 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
                 logger.warning(f"Error removing old roles from {member.display_name}: {e}")
 
     # Add new swing color role
-    if target_role not in member.roles:
+    member_role_ids = {r.id for r in member.roles}
+    if target_role.id not in member_role_ids:
         try:
             await member.add_roles(target_role, reason=f"Sentiment swing set to {chosen_color}")
             result["success"] = True
@@ -241,7 +249,8 @@ async def remove_swing_color_roles(bot, guild: discord.Guild, user_or_member: An
 
     bot_member = await get_bot_member(bot, actual_guild)
     all_color_roles = await get_all_guild_color_roles(actual_guild, db_manager, bot=bot)
-    roles_to_remove = [r for r in member.roles if r in all_color_roles]
+    all_color_role_ids = {r.id for r in all_color_roles}
+    roles_to_remove = [r for r in member.roles if r.id in all_color_role_ids]
 
     if not bot_member:
         return []
@@ -401,10 +410,12 @@ class AutoSetupButton(discord.ui.Button):
 
         await interaction.response.defer()
         await auto_setup_all_color_roles(interaction.guild, self.view.db_manager, bot=self.view.bot)
+        stats = await sync_all_server_members(self.view.bot, interaction.guild, self.view.db_manager)
+        sync_msg = f" Also automatically synced **{stats['synced']}** active player(s)!" if stats['synced'] > 0 else ""
         await self.view.refresh(
             interaction,
             is_followup=True,
-            notice="✅ **Auto-Setup Complete!** All 10 color roles were verified or created with their exact accent colors."
+            notice=f"✅ **Auto-Setup Complete!** All 10 color roles verified or created with their exact accent colors.{sync_msg}"
         )
 
 
@@ -607,10 +618,10 @@ class ColorRolesConfigView(discord.ui.LayoutView):
                 )
 
         info_blocks.append(
-            "> 🔄 **IMPORTANT: Pressing 'Sync My Role' or 'Sync All Players' is Necessary!**\n"
-            "> Discord role and name color changes require syncing via the buttons below:\n"
-            "> • **Individual Players:** After choosing or changing your Swing, press **`🔄 Sync My Role`** below to apply your color role and update your chat name color.\n"
-            "> • **GMs & Admins:** Press **`👥 Sync All Players`** at any time to sync all campaign members to their active swings in one click."
+            "> 🔄 **Automatic Swing Color Roles:**\n"
+            "> • **Automatic Sync:** When a player sets or changes a Swing in `/roll_to_dye` or `/roll_to_recover`, their matching color role is automatically applied!\n"
+            "> • **Automatic Drop:** When a player drops their Swing (`/drop_swing`, locking/wounding the swing die, or switching characters), all color roles are automatically removed!\n"
+            "> • **Sync Buttons:** If a player chose a swing before roles were configured, or if you need to refresh, click **`🔄 Sync My Role`** or **`👥 Sync All Players`** (GM) to sync instantly."
         )
 
         if notice:
@@ -618,9 +629,9 @@ class ColorRolesConfigView(discord.ui.LayoutView):
 
         action_guide = (
             "### 🛠️ **Server Actions**\n"
-            "• **🔄 Sync My Role:** **[NECESSARY TO APPLY]** Press this button to apply your active character's Swing color role to your Discord account so your name color changes in chat!\n"
-            "• **👥 Sync All Players:** **[GM / ADMIN]** Bulk-syncs all campaign players in the server with their active character's Swing in one click!\n"
-            "• **⚡ Auto-Setup Roles:** Scans server for matching color roles or creates missing ones with their exact accent colors.\n"
+            "• **⚡ Auto-Setup Roles:** Scans server for matching color roles or creates missing ones with their exact accent colors, and immediately auto-syncs all active players!\n"
+            "• **🔄 Sync My Role:** Refreshes your Discord role to match your active character's Swing (useful if your swing was chosen before roles were created).\n"
+            "• **👥 Sync All Players:** Bulk-syncs all campaign players in the server with their active character's Swing in one click!\n"
             "• **🧹 Reset Selected:** Clears the custom role mapping for the dropdown-selected color."
         )
 

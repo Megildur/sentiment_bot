@@ -83,10 +83,13 @@ For Discord to display a player's username in their Swing's color, Discord's rol
 3. **Move Color Roles to the Top:** Drag all 10 Color Roles (Red, Yellow, Green, etc.) directly below the bot's role.
 4. **Keep Other Colored Roles Lower:** Ensure members do not have other roles placed above the color roles that also have a custom color set (e.g. general member roles should have "Default" color, or be placed below the color roles).
 
-### 🔄 Applying & Syncing Roles to Members (`/color_roles`)
-To apply your swing color role to your Discord account and update your chat name color:
-- **Individual Players:** After choosing or changing a Swing, run **`/color_roles`** and press **`🔄 Sync My Role`**! Pressing this button is necessary to apply your active character's Swing color role to your Discord profile (or remove color roles if colorless).
-- **GMs & Admins:** Press **`👥 Sync All Players`** in `/color_roles` to update every campaign player in the server to their active character's swing simultaneously in one click!
+### 🔄 Automatic Syncing & Dropping of Color Roles
+- **Automatic Grant:** Whenever you choose or change a Swing via `/roll_to_dye` or `/roll_to_recover`, your matching Discord color role is granted automatically!
+- **Automatic Removal:** Whenever you drop your Swing (`/drop_swing`, locking/wounding your swing die, or switching characters), all color roles are stripped automatically so your name color reverts to normal.
+- **Sync Buttons (`/color_roles`):**
+  - **`⚡ Auto-Setup Roles`**: Automatically scans/creates all 10 color roles and immediately syncs all active players across the server.
+  - **`🔄 Sync My Role`**: Optional manual refresh if you had a swing chosen before roles were configured.
+  - **`👥 Sync All Players`**: One-click bulk sync for GMs/Admins.
 
 ```
 Server Role Hierarchy Example:

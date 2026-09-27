@@ -1,13 +1,17 @@
 import discord
 import random
+import logging
 from typing import Optional
 from .Constants import COLOR_EMOJIS, COLOR_DISCORD_COLORS, COLOR_ORDER
 from .ColorRoles import (
     assign_swing_color_role,
     remove_swing_color_roles,
     sync_member_swing_color_role,
+    get_guild_member,
     ColorRolesConfigView
 )
+
+logger = logging.getLogger("sentiment.views")
 
 MODAL_COLOR_EMOJIS = COLOR_EMOJIS.copy()
 MODAL_COLOR_EMOJIS["Grey"] = "🔘"
@@ -1321,6 +1325,7 @@ class SetSwingModal(discord.ui.Modal):
         self.add_item(discord.ui.Label(text="Select Swing Attribute", component=self.color_select))
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         chosen_color = self.color_select.values[0]
         await self.roll_view.update_swing(chosen_color, interaction)
 
@@ -1394,9 +1399,6 @@ class RollToDyeView(discord.ui.LayoutView):
             notes = [f"-# Support die from *{s['from_char']}* used and returned locked." for s in self.support_rolls]
             body_lines.append("\n" + "\n".join(notes))
 
-        if self.swing_info:
-            body_lines.append(f"\n-# 💡 **Active Swing: {self.swing_info[0]}** — Run `/color_roles` and click **🔄 Sync My Role** to update your chat name color!")
-
         accent_color = discord.Color.random()
         if self.swing_info and self.swing_info[0] in COLOR_DISCORD_COLORS:
             accent_color = COLOR_DISCORD_COLORS[self.swing_info[0]]
@@ -1428,20 +1430,25 @@ class RollToDyeView(discord.ui.LayoutView):
         guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
         if guild:
             try:
-                member = await get_guild_member(guild, self.user_id)
-                if member:
-                    await assign_swing_color_role(self.bot, guild, member, self.db_manager, chosen_color)
+                await assign_swing_color_role(self.bot, guild, self.user_id, self.db_manager, chosen_color)
             except Exception as e:
-                logger.debug(f"Auto-assign swing role error: {e}")
+                logger.error(f"Auto-assign swing role error: {e}", exc_info=True)
 
         for d in self.rolled_dice:
             d['is_swing'] = (d['color'] == chosen_color)
 
         self.render_view()
         try:
-            await interaction.response.edit_message(view=self)
-        except discord.HTTPException:
-            await interaction.response.send_message(view=self)
+            if interaction.response.is_done():
+                await interaction.edit_original_response(view=self)
+            else:
+                await interaction.response.edit_message(view=self)
+        except Exception:
+            try:
+                if interaction.message:
+                    await interaction.message.edit(view=self)
+            except Exception as e:
+                logger.error(f"Error updating roll view after modal: {e}", exc_info=True)
 
     async def apply_support_die(self, interaction: discord.Interaction):
         if not self.pending_support:
@@ -1637,9 +1644,6 @@ class RollToRecoverView(discord.ui.LayoutView):
             "-# Note: Total current HP cannot exceed your character's Maximum HP."
         ]
 
-        if self.swing_info:
-            lines.append(f"\n-# 💡 **Active Swing: {self.swing_info[0]}** — Run `/color_roles` and click **🔄 Sync My Role** to update your chat name color!")
-
         accent_color = get_swing_accent_color(self.swing_info)
 
         container = discord.ui.Container(
@@ -1667,17 +1671,22 @@ class RollToRecoverView(discord.ui.LayoutView):
         guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
         if guild:
             try:
-                member = await get_guild_member(guild, self.user_id)
-                if member:
-                    await assign_swing_color_role(self.bot, guild, member, self.db_manager, chosen_color)
+                await assign_swing_color_role(self.bot, guild, self.user_id, self.db_manager, chosen_color)
             except Exception as e:
-                logger.debug(f"Auto-assign swing role error: {e}")
+                logger.error(f"Auto-assign swing role error in recovery: {e}", exc_info=True)
 
         self.render_view()
         try:
-            await interaction.response.edit_message(view=self)
-        except discord.HTTPException:
-            await interaction.response.send_message(view=self)
+            if interaction.response.is_done():
+                await interaction.edit_original_response(view=self)
+            else:
+                await interaction.response.edit_message(view=self)
+        except Exception:
+            try:
+                if interaction.message:
+                    await interaction.message.edit(view=self)
+            except Exception as e:
+                logger.error(f"Error updating recovery roll view after modal: {e}", exc_info=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

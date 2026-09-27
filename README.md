@@ -71,7 +71,7 @@ A dedicated Discord companion bot for the **Sentiment Tabletop Roleplaying Game 
 
 ---
 
-## ⚙️ Important: Discord Role Hierarchy Setup
+## ⚙️ Important: Discord Role Hierarchy Setup & Syncing
 
 For Discord to display a player's username in their Swing's color, Discord's role hierarchy rules must be followed:
 
@@ -79,10 +79,14 @@ For Discord to display a player's username in their Swing's color, Discord's rol
 
 ### How to Configure Roles in Your Server:
 1. Open **Server Settings ➔ Roles**.
-2. **Position the Bot's Role Above Color Roles:** Ensure the bot has a role (e.g. `Sentiment Bot`) positioned higher than all color roles, with the **Manage Roles** permission enabled.
+2. **Position the Bot's Role Above Color Roles:** Ensure the bot has a role (e.g. `@Sentiment Bot` or `@Botzilla test`) positioned higher than all color roles, with the **Manage Roles** permission enabled.
 3. **Move Color Roles to the Top:** Drag all 10 Color Roles (Red, Yellow, Green, etc.) directly below the bot's role.
 4. **Keep Other Colored Roles Lower:** Ensure members do not have other roles placed above the color roles that also have a custom color set (e.g. general member roles should have "Default" color, or be placed below the color roles).
-5. **Note on Server Owners:** Discord's internal security policy strictly prevents any bot from modifying the roles of the **Server Owner**. To test automatic role changes in action, test with another server member or a secondary test account!
+
+### 🔄 Applying & Syncing Roles to Members (`/color_roles`)
+To apply your swing color role to your Discord account and update your chat name color:
+- **Individual Players:** After choosing or changing a Swing, run **`/color_roles`** and press **`🔄 Sync My Role`**! Pressing this button is necessary to apply your active character's Swing color role to your Discord profile (or remove color roles if colorless).
+- **GMs & Admins:** Press **`👥 Sync All Players`** in `/color_roles` to update every campaign player in the server to their active character's swing simultaneously in one click!
 
 ```
 Server Role Hierarchy Example:

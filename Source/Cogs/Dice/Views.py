@@ -1394,6 +1394,9 @@ class RollToDyeView(discord.ui.LayoutView):
             notes = [f"-# Support die from *{s['from_char']}* used and returned locked." for s in self.support_rolls]
             body_lines.append("\n" + "\n".join(notes))
 
+        if self.swing_info:
+            body_lines.append(f"\n-# 💡 **Active Swing: {self.swing_info[0]}** — Run `/color_roles` and click **🔄 Sync My Role** to update your chat name color!")
+
         accent_color = discord.Color.random()
         if self.swing_info and self.swing_info[0] in COLOR_DISCORD_COLORS:
             accent_color = COLOR_DISCORD_COLORS[self.swing_info[0]]
@@ -1422,8 +1425,14 @@ class RollToDyeView(discord.ui.LayoutView):
         await self.db_manager.set_swing(self.user_id, self.char_name, chosen_color, matching_die['roll'])
         self.swing_info = (chosen_color, matching_die['roll'], matching_die['bonus'])
 
-        if interaction.guild:
-            role_res = await assign_swing_color_role(self.bot, interaction.guild, interaction.user, self.db_manager, chosen_color)
+        guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
+        if guild:
+            try:
+                member = await get_guild_member(guild, self.user_id)
+                if member:
+                    await assign_swing_color_role(self.bot, guild, member, self.db_manager, chosen_color)
+            except Exception as e:
+                logger.debug(f"Auto-assign swing role error: {e}")
 
         for d in self.rolled_dice:
             d['is_swing'] = (d['color'] == chosen_color)
@@ -1628,6 +1637,9 @@ class RollToRecoverView(discord.ui.LayoutView):
             "-# Note: Total current HP cannot exceed your character's Maximum HP."
         ]
 
+        if self.swing_info:
+            lines.append(f"\n-# 💡 **Active Swing: {self.swing_info[0]}** — Run `/color_roles` and click **🔄 Sync My Role** to update your chat name color!")
+
         accent_color = get_swing_accent_color(self.swing_info)
 
         container = discord.ui.Container(
@@ -1652,8 +1664,14 @@ class RollToRecoverView(discord.ui.LayoutView):
         await self.db_manager.set_swing(self.user_id, self.char_name, chosen_color, matching_die['roll'])
         self.swing_info = (chosen_color, matching_die['roll'], matching_die['bonus'])
 
-        if interaction.guild:
-            role_res = await assign_swing_color_role(self.bot, interaction.guild, interaction.user, self.db_manager, chosen_color)
+        guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
+        if guild:
+            try:
+                member = await get_guild_member(guild, self.user_id)
+                if member:
+                    await assign_swing_color_role(self.bot, guild, member, self.db_manager, chosen_color)
+            except Exception as e:
+                logger.debug(f"Auto-assign swing role error: {e}")
 
         self.render_view()
         try:

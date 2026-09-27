@@ -606,14 +606,21 @@ class ColorRolesConfigView(discord.ui.LayoutView):
                     f"> 🤖 **Bot Status:** Role: **@{bot_top_role.name}** (Position: `{bot_pos}`) | Manage Roles: **Active ✅**"
                 )
 
+        info_blocks.append(
+            "> 🔄 **IMPORTANT: Pressing 'Sync My Role' or 'Sync All Players' is Necessary!**\n"
+            "> Discord role and name color changes require syncing via the buttons below:\n"
+            "> • **Individual Players:** After choosing or changing your Swing, press **`🔄 Sync My Role`** below to apply your color role and update your chat name color.\n"
+            "> • **GMs & Admins:** Press **`👥 Sync All Players`** at any time to sync all campaign members to their active swings in one click."
+        )
+
         if notice:
             info_blocks.append(f"> {notice}")
 
         action_guide = (
             "### 🛠️ **Server Actions**\n"
+            "• **🔄 Sync My Role:** **[NECESSARY TO APPLY]** Press this button to apply your active character's Swing color role to your Discord account so your name color changes in chat!\n"
+            "• **👥 Sync All Players:** **[GM / ADMIN]** Bulk-syncs all campaign players in the server with their active character's Swing in one click!\n"
             "• **⚡ Auto-Setup Roles:** Scans server for matching color roles or creates missing ones with their exact accent colors.\n"
-            "• **🔄 Sync My Role:** Refreshes your own Discord role to match your active character's Swing.\n"
-            "• **👥 Sync All Players:** Updates all campaign players in the server to match their active character's Swing.\n"
             "• **🧹 Reset Selected:** Clears the custom role mapping for the dropdown-selected color."
         )
 

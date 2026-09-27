@@ -575,20 +575,23 @@ class Dice(commands.Cog):
             discord.ui.TextDisplay(content="## 🎨 **Sentiment Guide: Swing Color Roles & Name Colors**"),
             discord.ui.Separator(),
             discord.ui.TextDisplay(content=
-                "**Dynamic Swing Color Roles**\n"
-                "• Setting a Swing in `/roll_to_dye` or `/roll_to_recover` automatically assigns the matching Discord color role.\n"
-                "• Changes your username color in chat and the member list to match your active Swing's accent color (all 10 Sentiment colors supported).\n"
-                "• Dropping your Swing (`/drop_swing`, locking/wounding the swing die, or switching characters) immediately removes the role.\n\n"
-                "**`/color_roles` Command**\n"
-                "• Interactive server management menu with dropdowns and buttons to manage color roles.\n"
-                "• **⚡ Auto-Setup:** Searches the server for existing color roles or automatically creates them with their exact accent colors.\n"
-                "• **Role Picker:** Use dropdowns to customize or map custom roles for each color.\n"
-                "• **🔄 Sync My Role:** Instantly syncs your color role to your current character's active swing.\n\n"
-                "⚠️ **CRITICAL: Role Hierarchy Setup for Name Colors**\n"
+                "**Dynamic Swing Color Roles & Chat Name Colors**\n"
+                "• Matches your username color in chat and the member list to your active character's Swing accent color (all 10 Sentiment colors supported).\n\n"
+                "⚠️ **CRITICAL: Syncing Roles via `/color_roles` is Necessary!**\n"
+                "• After choosing a Swing in `/roll_to_dye` or `/roll_to_recover`, you must open **`/color_roles`** and press **`🔄 Sync My Role`** to apply the color role to your Discord account and change your chat name color.\n"
+                "• **Pressing 'Sync My Role' is necessary to apply your swing role to your Discord account.**\n"
+                "• **GMs & Admins:** You can press **`👥 Sync All Players`** in `/color_roles` at any time to sync all campaign players in the server to their active character's swing simultaneously in one click!\n"
+                "• When you drop your Swing (`/drop_swing`, locking/wounding the swing die, or switching characters), open `/color_roles` and press **`🔄 Sync My Role`** to remove the role so your name color reverts to normal.\n\n"
+                "**`/color_roles` Command Actions**\n"
+                "• **🔄 Sync My Role:** **[NECESSARY]** Applies your active character's swing color role to your Discord account so your chat name color updates.\n"
+                "• **👥 Sync All Players:** **[GM / ADMIN]** Bulk-syncs all campaign players in the server to their active swings in one click.\n"
+                "• **⚡ Auto-Setup:** Searches the server for existing color roles or creates missing ones with their exact accent colors.\n"
+                "• **Role Picker:** Use dropdowns to customize or map custom roles for each color.\n\n"
+                "⚠️ **Role Hierarchy Setup for Name Colors**\n"
                 "• In Discord, your chat name color is determined by your **highest role that has a color**.\n"
                 "• **Move all Color Roles to the top** of your server's role hierarchy (Server Settings ➔ Roles), positioned directly below the bot's role.\n"
                 "• Ensure the **Bot's role** is higher than all color roles and has the **Manage Roles** permission enabled.\n"
-                "• Ensure members do not have a colored role above the color roles, or Discord will display that role's color instead!"
+                "• Ensure members do not have another colored role above the color roles, or Discord will display that role's color instead!"
             ),
             accent_color=discord.Color.gold()
         )

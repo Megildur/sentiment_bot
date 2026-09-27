@@ -1325,7 +1325,6 @@ class SetSwingModal(discord.ui.Modal):
         self.add_item(discord.ui.Label(text="Select Swing Attribute", component=self.color_select))
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
         chosen_color = self.color_select.values[0]
         await self.roll_view.update_swing(chosen_color, interaction)
 
@@ -1439,16 +1438,9 @@ class RollToDyeView(discord.ui.LayoutView):
 
         self.render_view()
         try:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(view=self)
-            else:
-                await interaction.response.edit_message(view=self)
-        except Exception:
-            try:
-                if interaction.message:
-                    await interaction.message.edit(view=self)
-            except Exception as e:
-                logger.error(f"Error updating roll view after modal: {e}", exc_info=True)
+            await interaction.response.edit_message(view=self)
+        except discord.HTTPException:
+            await interaction.response.send_message(view=self)
 
     async def apply_support_die(self, interaction: discord.Interaction):
         if not self.pending_support:
@@ -1677,16 +1669,9 @@ class RollToRecoverView(discord.ui.LayoutView):
 
         self.render_view()
         try:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(view=self)
-            else:
-                await interaction.response.edit_message(view=self)
-        except Exception:
-            try:
-                if interaction.message:
-                    await interaction.message.edit(view=self)
-            except Exception as e:
-                logger.error(f"Error updating recovery roll view after modal: {e}", exc_info=True)
+            await interaction.response.edit_message(view=self)
+        except discord.HTTPException:
+            await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

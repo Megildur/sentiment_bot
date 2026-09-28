@@ -1,3 +1,4 @@
+import asyncio
 import discord
 import random
 from discord.ext import commands
@@ -25,6 +26,7 @@ from .Views import (
     ColorRolesConfigView,
     NoCharactersLeftView,
     get_persistent_views,
+    update_user_active_character_views,
 )
 from .ColorRoles import remove_swing_color_roles, sync_member_swing_color_role
 from Source.Utils.Paginator import ButtonPaginator
@@ -71,6 +73,7 @@ class Dice(commands.Cog):
         if not active_char or active_char not in all_chars:
             active_char = all_chars[0]
             await self.db_manager.set_selected_char(interaction.user.id, active_char)
+            asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
         return active_char
 
@@ -208,6 +211,7 @@ class Dice(commands.Cog):
             max_hp=max_hp
         )
         await interaction.followup.send(view=view)
+        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
     @app_commands.command(name="set_gm", description="choose who is the game gm")
     @app_commands.describe(user="user to set as gm")
@@ -225,12 +229,16 @@ class Dice(commands.Cog):
                 active_char = all_chars[0]
                 await self.db_manager.set_selected_char(interaction.user.id, active_char)
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-            await interaction.followup.send(view=view)
+            msg = await interaction.followup.send(view=view)
+            ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "AttributeSetView")
         else:
             if active_char:
                 await self.db_manager.completely_delete_character(interaction.user.id, active_char)
             view = NoCharactersLeftView(self.bot, self.db_manager, user_id=interaction.user.id)
-            await interaction.followup.send(view=view)
+            msg = await interaction.followup.send(view=view)
+            ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "NoCharactersLeftView")
 
     async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         chars = await self.db_manager.get_all_characters(interaction.user.id)
@@ -258,6 +266,7 @@ class Dice(commands.Cog):
         char_color = await self._get_char_color(interaction.user.id, characters)
         view = NoticeView("✅ Active Character Changed", f"Your active character has been changed to **{characters}**.", color=char_color)
         await interaction.followup.send(view=view, ephemeral=True)
+        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, characters))
 
     @app_commands.command(name="roll_wild", description="Roll a standalone 1d6")
     async def roll_wild(self, interaction: discord.Interaction):
@@ -283,7 +292,9 @@ class Dice(commands.Cog):
             return
 
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-        await interaction.followup.send(view=view)
+        msg = await interaction.followup.send(view=view)
+        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
 
     @app_commands.command(name="wound_die", description="Wound an attribute die")
     async def wound_die(self, interaction: discord.Interaction):
@@ -397,6 +408,7 @@ class Dice(commands.Cog):
             await remove_swing_color_roles(self.bot, guild, interaction.user.id, self.db_manager)
         view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
         await interaction.followup.send(view=view)
+        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
     @app_commands.command(name="support", description="Share an attribute die to support an ally's roll")
     @app_commands.describe(user="The ally you want to support with a die")
@@ -447,6 +459,7 @@ class Dice(commands.Cog):
         swing = await self.db_manager.get_swing(interaction.user.id, active_char)
         view = HPActionResultView(display_name, "heal", amount, old_hp, new_hp, max_hp, swing=swing)
         await interaction.followup.send(view=view)
+        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
     @hp.command(name="damage", description="Deal damage to your active character's current HP")
     @app_commands.describe(amount="Amount of damage taken")
@@ -473,6 +486,7 @@ class Dice(commands.Cog):
             swing=swing
         )
         await interaction.followup.send(view=view)
+        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
     @hp.command(name="max", description="Open the Manage Max HP submenu (Level Up Potential brackets or custom adjust)")
     async def hp_max(self, interaction: discord.Interaction):
@@ -482,7 +496,9 @@ class Dice(commands.Cog):
             return
 
         view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
-        await interaction.followup.send(view=view)
+        msg = await interaction.followup.send(view=view)
+        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "ManageMaxHPView")
 
     @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
     @app_commands.guild_only()

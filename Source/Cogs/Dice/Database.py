@@ -39,6 +39,7 @@ class DiceDatabase():
         await self.db.execute("CREATE TABLE IF NOT EXISTS hp (user_id INTEGER, char_name TEXT, current_hp INTEGER DEFAULT 10, max_hp INTEGER DEFAULT 10, PRIMARY KEY (user_id, char_name))")
         await self.db.execute("INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp) SELECT DISTINCT user_id, char_name, 10, 10 FROM attributes")
         await self.db.execute("CREATE TABLE IF NOT EXISTS guild_color_roles (guild_id INTEGER, color TEXT, role_id INTEGER, PRIMARY KEY (guild_id, color))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS active_character_views (user_id INTEGER, channel_id INTEGER, message_id INTEGER PRIMARY KEY, view_type TEXT)")
         await self.db.commit()
 
     async def set_gm_check(self, interaction, user_id: int):
@@ -511,6 +512,31 @@ class DiceDatabase():
                 (guild_id,)
             )
             await self.db.commit()
+
+    async def track_active_view(self, user_id: int, channel_id: int, message_id: int, view_type: str):
+        async with self.db_lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO active_character_views (user_id, channel_id, message_id, view_type) VALUES (?, ?, ?, ?)",
+                (user_id, channel_id, message_id, view_type)
+            )
+            await self.db.commit()
+
+    async def untrack_active_view(self, message_id: int):
+        async with self.db_lock:
+            await self.db.execute(
+                "DELETE FROM active_character_views WHERE message_id = ?",
+                (message_id,)
+            )
+            await self.db.commit()
+
+    async def get_user_active_views(self, user_id: int) -> list[tuple[int, int, str]]:
+        async with self.db_lock:
+            cursor = await self.db.execute(
+                "SELECT channel_id, message_id, view_type FROM active_character_views WHERE user_id = ?",
+                (user_id,)
+            )
+            rows = await cursor.fetchall()
+            return [(row[0], row[1], row[2]) for row in rows]
 
 
 

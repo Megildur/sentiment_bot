@@ -24,11 +24,15 @@ def resolve_context(component_or_view, interaction: discord.Interaction):
 def extract_all_text_from_message(msg: Optional[discord.Message]) -> str:
     if not msg:
         return ""
-    texts = [msg.content] if getattr(msg, "content", None) else []
+    texts = [msg.content] if (getattr(msg, "content", None) and isinstance(msg.content, str)) else []
+    visited = set()
     def walk(comp):
-        if hasattr(comp, "content") and comp.content:
+        if comp is None or id(comp) in visited:
+            return
+        visited.add(id(comp))
+        if hasattr(comp, "content") and comp.content and isinstance(comp.content, str):
             texts.append(comp.content)
-        if hasattr(comp, "children"):
+        if hasattr(comp, "children") and isinstance(comp.children, (list, tuple)):
             for ch in comp.children:
                 walk(ch)
         if hasattr(comp, "accessory") and comp.accessory:
@@ -36,11 +40,13 @@ def extract_all_text_from_message(msg: Optional[discord.Message]) -> str:
     for comp in getattr(msg, "components", []):
         walk(comp)
     for embed in getattr(msg, "embeds", []):
-        if getattr(embed, "description", None):
+        if getattr(embed, "description", None) and isinstance(embed.description, str):
             texts.append(embed.description)
         for f in getattr(embed, "fields", []):
-            texts.append(f.value)
+            if getattr(f, "value", None) and isinstance(f.value, str):
+                texts.append(f.value)
     return chr(10).join(texts)
+
 
 async def get_effective_char_and_user(component_or_view, interaction: discord.Interaction, db_manager = None):
     view = getattr(component_or_view, "view", None) or getattr(component_or_view, "parent_view", None) or component_or_view
@@ -62,11 +68,18 @@ async def get_effective_char_and_user(component_or_view, interaction: discord.In
             char_name = m.group(1).strip()
             if char_name.endswith(" (NPC)"):
                 char_name = char_name[:-6].strip()
+        else:
+            m_do = re.search(r"^\*([^*]+)\*\s+rolled for", full_text, re.MULTILINE)
+            if m_do:
+                char_name = m_do.group(1).strip()
+                if char_name.endswith(" (NPC)"):
+                    char_name = char_name[:-6].strip()
 
     if not char_name and db_manager:
         char_name = await db_manager.get_selected_char(user_id)
 
     return user_id, char_name
+
 
 async def check_intended_user(view, interaction: discord.Interaction, error_message: str = "❌ This menu is not for you.", allow_gm: bool = False, db_manager = None) -> bool:
     expected_user_id = getattr(view, "user_id", None)
@@ -1540,26 +1553,89 @@ class SetSwingModal(discord.ui.Modal):
         user_id, char_name = await get_effective_char_and_user(self.roll_view, interaction, db_manager)
         matching = next((c for c in self.choices if c["color"] == chosen_color), None)
         die_val = matching["roll"] if matching else 1
+        die_bonus = matching["bonus"] if matching else 0
 
-        if self.roll_view and hasattr(self.roll_view, "update_swing"):
-            if not getattr(self.roll_view, "rolled_dice", None):
-                self.roll_view.rolled_dice = [dict(c) for c in self.choices]
-            if getattr(self.roll_view, "user_id", None) is None:
-                self.roll_view.user_id = user_id
-            if not getattr(self.roll_view, "char_name", None):
-                self.roll_view.char_name = char_name
-            if not getattr(self.roll_view, "display_name", None):
-                self.roll_view.display_name = char_name
-            if not getattr(self.roll_view, "db_manager", None):
-                self.roll_view.db_manager = db_manager
-            if not getattr(self.roll_view, "bot", None):
-                self.roll_view.bot = bot
-            await self.roll_view.update_swing(chosen_color, interaction)
-        else:
+        full_text = extract_all_text_from_message(interaction.message) if interaction.message else ""
+
+        if db_manager and user_id and char_name:
             await db_manager.set_swing(user_id, char_name, chosen_color, die_val)
-            if interaction.guild:
-                asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, user_id, db_manager))
-            await interaction.response.send_message(f"⭐ **Swing set to {chosen_color} (Die: {die_val})!**", ephemeral=True)
+
+        guild = interaction.guild or (bot.get_guild(interaction.guild_id) if (bot and interaction.guild_id) else None)
+        if guild and bot and user_id and db_manager:
+            try:
+                await assign_swing_color_role(bot, guild, user_id, db_manager, chosen_color)
+            except Exception as e:
+                logger.error(f"Auto-assign swing role error: {e}", exc_info=True)
+
+        if "Roll to Recover" in full_text:
+            m = re.search(r"HP Updated:\s*`(\d+)\s*/\s*(\d+)`\s*➔\s*`(\d+)\s*/\s*(\d+)\s*HP`", full_text)
+            old_hp = int(m.group(1)) if m else 10
+            max_hp = int(m.group(2)) if m else 10
+            new_hp = int(m.group(3)) if m else 10
+            m_char = re.search(r"\*\*Character:\*\*\s*\*([^*]+)\*", full_text)
+            display_name = m_char.group(1).strip() if m_char else char_name
+            rolled_dice = [dict(c) for c in self.choices]
+            swing_info = (chosen_color, die_val, die_bonus)
+            view = RollToRecoverView(
+                bot=bot,
+                user_id=user_id,
+                char_name=char_name,
+                display_name=display_name,
+                rolled_dice=rolled_dice,
+                swing_info=swing_info,
+                db_manager=db_manager,
+                old_hp=old_hp,
+                new_hp=new_hp,
+                max_hp=max_hp
+            )
+            try:
+                await interaction.response.edit_message(view=view)
+            except discord.HTTPException:
+                await interaction.response.send_message(view=view)
+            return
+
+        m_char = re.search(r"\*\*Character:\*\*\s*\*([^*]+)\*", full_text)
+        display_name = m_char.group(1).strip() if m_char else char_name
+        rolled_dice = [dict(c) for c in self.choices]
+        for d in rolled_dice:
+            d["is_swing"] = (d["color"] == chosen_color)
+        swing_info = (chosen_color, die_val, die_bonus)
+
+        if db_manager and user_id and char_name:
+            pending_support = await db_manager.get_pending_support_dice(user_id, char_name)
+        else:
+            pending_support = []
+
+        support_rolls = []
+        supp_pattern = re.compile(r"•\s*🤝.*?(?:from\s*\*([^*]+)\*|\(\*([^*]+)\*\))\s*\)?:\s*(?:Die\s*)?(?:\*\*)?(?:\+)?(\d+)(?:\*\*)?")
+        for sm in supp_pattern.finditer(full_text):
+            from_char = (sm.group(1) or sm.group(2)).strip()
+            r_val = int(sm.group(3))
+            support_rolls.append({
+                "color": "Support",
+                "name": "Support",
+                "from_char": from_char,
+                "from_user_id": 0,
+                "roll": r_val
+            })
+
+
+        view = RollToDyeView(
+            bot=bot,
+            user_id=user_id,
+            char_name=char_name,
+            display_name=display_name,
+            rolled_dice=rolled_dice,
+            swing_info=swing_info,
+            pending_support=pending_support,
+            db_manager=db_manager
+        )
+        view.support_rolls = support_rolls
+        view.render_view()
+        try:
+            await interaction.response.edit_message(view=view)
+        except discord.HTTPException:
+            await interaction.response.send_message(view=view)
 
 
 class SetSwingButton(discord.ui.Button):
@@ -1617,11 +1693,167 @@ class ApplySupportDieButton(discord.ui.Button):
         self.roll_view = roll_view
 
     async def callback(self, interaction: discord.Interaction):
-        roll_view = getattr(self, "roll_view", None) or getattr(self, "view", None)
-        if roll_view and hasattr(roll_view, "apply_support_die"):
-            await roll_view.apply_support_die(interaction)
-        else:
-            await interaction.response.send_message("❌ Cannot apply support die to this view.", ephemeral=True)
+        full_text = extract_all_text_from_message(interaction.message) if interaction.message else ""
+        bot, db_manager = resolve_context(self, interaction)
+        user_id, char_name = await get_effective_char_and_user(self, interaction, db_manager)
+
+        if "Roll to Do" in full_text:
+            if not db_manager:
+                await interaction.response.send_message("❌ Database unavailable.", ephemeral=True)
+                return
+            db_pending = await db_manager.get_pending_support_dice(user_id, char_name)
+            if not db_pending:
+                await interaction.response.send_message("❌ No support dice available to apply.", ephemeral=True)
+                return
+
+            item = db_pending[0]
+            roll_val = random.randint(1, 6)
+            await db_manager.consume_support_die(
+                share_user_id=item["share_user_id"],
+                share_char=item["share_char_name"],
+                recv_user_id=user_id,
+                recv_char=char_name,
+                attribute=item["attribute"]
+            )
+            if interaction.guild:
+                asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, item["share_user_id"], db_manager))
+
+            m_do_char = re.search(r"^\*([^*]+)\*\s+rolled for", full_text, re.MULTILINE)
+            display_name = m_do_char.group(1).strip() if m_do_char else char_name
+            m_d20 = re.search(r"d20 Die Roll:\*\*\s*\*\*(\d+)\*\*", full_text)
+            d20_roll = int(m_d20.group(1)) if m_d20 else 1
+            m_wild = re.search(r"1d6 Wild Roll:\*\*\s*\*\*\+(\d+)\*\*", full_text)
+            d6_wild = int(m_wild.group(1)) if m_wild else 0
+            m_swing = re.search(r"rolled for [^\s]+ \*\*([A-Za-z]+)\*\* \(\*([^*]*)\*\)", full_text)
+            m_swing_vals = re.search(r"Active Swing:\*\*\s*\*\*(\d+)\*\*\s*\(\+(\d+)\s+Attribute Bonus", full_text)
+            swing_info = (m_swing.group(1), m_swing.group(2), int(m_swing_vals.group(1)), int(m_swing_vals.group(2))) if (m_swing and m_swing_vals) else None
+
+            support_rolls = []
+            supp_pattern = re.compile(r"•\s*🤝.*?(?:from\s*\*([^*]+)\*|\(\*([^*]+)\*\))\s*\)?:\s*(?:Die\s*)?(?:\*\*)?(?:\+)?(\d+)(?:\*\*)?")
+            for sm in supp_pattern.finditer(full_text):
+                from_char = (sm.group(1) or sm.group(2)).strip()
+                r_val = int(sm.group(3))
+                support_rolls.append({
+                    "color": "Support",
+                    "name": "Support",
+                    "from_char": from_char,
+                    "from_user_id": 0,
+                    "roll": r_val
+                })
+
+
+            support_rolls.append({
+                "color": item["attribute"],
+                "name": item["attribute_name"],
+                "from_char": item["share_char_name"],
+                "from_user_id": item["share_user_id"],
+                "roll": roll_val
+            })
+
+            pending_support = db_pending[1:]
+            view = RollToDoView(bot, user_id, char_name, display_name, swing_info, d20_roll, d6_wild, pending_support, db_manager)
+            view.support_rolls = support_rolls
+            view.render_view()
+            try:
+                await interaction.response.edit_message(view=view)
+            except discord.HTTPException:
+                await interaction.response.send_message(view=view)
+            return
+
+        if not db_manager:
+            await interaction.response.send_message("❌ Database unavailable.", ephemeral=True)
+            return
+
+        db_pending = await db_manager.get_pending_support_dice(user_id, char_name)
+        if not db_pending:
+            await interaction.response.send_message("❌ No support dice available to apply.", ephemeral=True)
+            return
+
+        item = db_pending[0]
+        roll_val = random.randint(1, 6)
+        await db_manager.consume_support_die(
+            share_user_id=item["share_user_id"],
+            share_char=item["share_char_name"],
+            recv_user_id=user_id,
+            recv_char=char_name,
+            attribute=item["attribute"]
+        )
+        if interaction.guild:
+            asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, item["share_user_id"], db_manager))
+
+        m_char = re.search(r"\*\*Character:\*\*\s*\*([^*]+)\*", full_text)
+        display_name = m_char.group(1).strip() if m_char else char_name
+
+        attr_bonuses = {}
+        if db_manager and user_id and char_name:
+            try:
+                raw_attrs = await db_manager.get_character_attributes(user_id, char_name)
+                attr_bonuses = {row[0]: row[1] for row in raw_attrs}
+            except Exception:
+                attr_bonuses = {}
+
+        line_pattern = re.compile(
+            r"•\s+[^\n\r*]*\*\*([A-Za-z]+)\*\*\s*\(\*([^*]*)\*\):\s*(?:Die\s*\*\*(\d+)\*\*\s*\+\s*Bonus\s*\*\*([+-]?\d+)\*\*|\*\*(\d+)\*\*(?:\s*\(\+([+-]?\d+)\s+Bonus\))?)"
+        )
+        valid_colors = ["Red", "Yellow", "Green", "Blue", "Purple", "Orange", "Grey", "Black", "White", "Clear"]
+        parsed_dice = []
+        for m in line_pattern.finditer(full_text):
+            color = m.group(1).capitalize()
+            if color not in valid_colors:
+                continue
+            name = m.group(2).strip() if m.group(2) else "None"
+            if m.group(3) is not None:
+                die_val = int(m.group(3))
+                bonus_val = int(m.group(4))
+            else:
+                die_val = int(m.group(5))
+                bonus_val = int(m.group(6)) if m.group(6) is not None else attr_bonuses.get(color, 0)
+            is_swing = ("⭐" in m.group(0))
+            parsed_dice.append({
+                "color": color,
+                "name": name,
+                "roll": die_val,
+                "bonus": bonus_val,
+                "is_swing": is_swing
+            })
+
+        swing_info = None
+        for d in parsed_dice:
+            if d.get("is_swing"):
+                swing_info = (d["color"], d["roll"], d["bonus"])
+                break
+
+        support_rolls = []
+        supp_pattern = re.compile(r"•\s*🤝.*?(?:from\s*\*([^*]+)\*|\(\*([^*]+)\*\))\s*\)?:\s*(?:Die\s*)?(?:\*\*)?(?:\+)?(\d+)(?:\*\*)?")
+        for sm in supp_pattern.finditer(full_text):
+            from_char = (sm.group(1) or sm.group(2)).strip()
+            r_val = int(sm.group(3))
+            support_rolls.append({
+                "color": "Support",
+                "name": "Support",
+                "from_char": from_char,
+                "from_user_id": 0,
+                "roll": r_val
+            })
+
+
+        support_rolls.append({
+            "color": item["attribute"],
+            "name": item["attribute_name"],
+            "from_char": item["share_char_name"],
+            "from_user_id": item["share_user_id"],
+            "roll": roll_val
+        })
+
+        pending_support = db_pending[1:]
+        view = RollToDyeView(bot, user_id, char_name, display_name, parsed_dice, swing_info, pending_support, db_manager)
+        view.support_rolls = support_rolls
+        view.render_view()
+        try:
+            await interaction.response.edit_message(view=view)
+        except discord.HTTPException:
+            await interaction.response.send_message(view=view)
+
 
 
 class RollToDyeView(discord.ui.LayoutView):
@@ -1719,7 +1951,28 @@ class RollToDyeView(discord.ui.LayoutView):
         for d in self.rolled_dice:
             d['is_swing'] = (d['color'] == chosen_color)
 
+        if self.db_manager and self.user_id and self.char_name:
+            self.pending_support = await self.db_manager.get_pending_support_dice(self.user_id, self.char_name)
+        else:
+            self.pending_support = []
+
+        if not self.support_rolls and interaction.message:
+            full_text = extract_all_text_from_message(interaction.message)
+            supp_pattern = re.compile(r"•\s*🤝.*?(?:from\s*\*([^*]+)\*|\(\*([^*]+)\*\))\s*\)?:\s*(?:Die\s*)?(?:\*\*)?(?:\+)?(\d+)(?:\*\*)?")
+            for sm in supp_pattern.finditer(full_text):
+                from_char = (sm.group(1) or sm.group(2)).strip()
+                r_val = int(sm.group(3))
+                self.support_rolls.append({
+                    "color": "Support",
+                    "name": "Support",
+                    "from_char": from_char,
+                    "from_user_id": 0,
+                    "roll": r_val
+                })
+
+
         self.render_view()
+
         try:
             await interaction.response.edit_message(view=self)
         except discord.HTTPException:
@@ -2118,7 +2371,7 @@ def get_persistent_views(bot, db_manager) -> list[discord.ui.LayoutView]:
         user_id=None,
         char_name="",
         display_name="",
-        rolled_dice=[],
+        rolled_dice=[{"color": "Red", "name": "None", "roll": 1, "bonus": 0}],
         swing_info=None,
         db_manager=db_manager
     )
@@ -2129,4 +2382,8 @@ def get_persistent_views(bot, db_manager) -> list[discord.ui.LayoutView]:
 
     views.append(ColorRolesConfigView.get_persistent_view(bot=bot, db_manager=db_manager))
 
+    from Source.Utils.Paginator import ButtonPaginator
+    views.append(ButtonPaginator.create_persistent_paginator())
+
     return views
+

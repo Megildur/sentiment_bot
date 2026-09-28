@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Any, Sequence, Union
+import re
 
 import discord
 from discord.abc import Messageable
@@ -9,10 +10,10 @@ class ButtonPaginator(discord.ui.LayoutView):
     
     def __init__(
         self,
-        pages: Sequence[discord.ui.Container],
+        pages: Optional[Sequence[discord.ui.Container]] = None,
         *,
         author_id: Optional[int] = None,
-        timeout: Optional[float] = 600.0,
+        timeout: Optional[float] = None,
         loop: bool = False,
         custom_buttons: Optional[List[discord.ui.Button]] = None,
     ) -> None:
@@ -20,8 +21,8 @@ class ButtonPaginator(discord.ui.LayoutView):
         self.message: Optional[Union[discord.Message, discord.WebhookMessage]] = None
         self.author_id: Optional[int] = author_id
         self.current_page: int = 0
-        self.pages = pages
-        self.max_pages = len(pages)
+        self.pages = list(pages) if pages is not None else []
+        self.max_pages = len(self.pages)
         self.loop: bool = loop
         self.custom_buttons = custom_buttons or []
 
@@ -30,26 +31,61 @@ class ButtonPaginator(discord.ui.LayoutView):
         self.next_btn = self._create_next_button()
 
     def _create_previous_button(self) -> discord.ui.Button:
-        button = discord.ui.Button(label="◀️ Previous", style=discord.ButtonStyle.secondary)
+        button = discord.ui.Button(label="◀️ Previous", style=discord.ButtonStyle.secondary, custom_id="paginator_prev")
         button.callback = self._previous_callback
         return button
 
     def _create_next_button(self) -> discord.ui.Button:
-        button = discord.ui.Button(label="Next ▶️", style=discord.ButtonStyle.secondary)
+        button = discord.ui.Button(label="Next ▶️", style=discord.ButtonStyle.secondary, custom_id="paginator_next")
         button.callback = self._next_callback
         return button
 
     def _create_page_indicator(self) -> discord.ui.Button:
-        button = discord.ui.Button(style=discord.ButtonStyle.primary, disabled=True)
+        button = discord.ui.Button(style=discord.ButtonStyle.primary, disabled=True, custom_id="paginator_indicator")
         button.callback = self._indicator_callback
         return button
+
+    @staticmethod
+    def _find_component_by_custom_id(items: Sequence[Any], custom_id: str) -> Optional[Any]:
+        for item in items:
+            if getattr(item, "custom_id", None) == custom_id or (isinstance(item, dict) and item.get("custom_id") == custom_id):
+                return item
+            children = getattr(item, "children", None)
+            if children is None and isinstance(item, dict):
+                children = item.get("components")
+            if children:
+                found = ButtonPaginator._find_component_by_custom_id(children, custom_id)
+                if found:
+                    return found
+        return None
+
+    def _sync_page_from_message(self, message: Optional[discord.Message]) -> None:
+        if not self.pages:
+            from Source.Cogs.Dice.HelpPages import get_help_pages
+            self.pages = get_help_pages()
+            self.max_pages = len(self.pages)
+        if not message:
+            return
+        btn = self._find_component_by_custom_id(getattr(message, "components", []), "paginator_indicator")
+        if btn:
+            label = getattr(btn, "label", None) or (btn.get("label") if isinstance(btn, dict) else None)
+            if label:
+                match = re.search(r"Page\s+(\d+)/(\d+)", label)
+                if match:
+                    self.current_page = max(0, min(int(match.group(1)) - 1, self.max_pages - 1))
 
     def _render(self) -> None:
         self.clear_items()
 
         if not self.pages:
+            from Source.Cogs.Dice.HelpPages import get_help_pages
+            self.pages = get_help_pages()
+            self.max_pages = len(self.pages)
+
+        if not self.pages:
             return
 
+        self.current_page = max(0, min(self.current_page, self.max_pages - 1))
         container = self.pages[self.current_page]
 
         items_to_remove = [
@@ -93,6 +129,7 @@ class ButtonPaginator(discord.ui.LayoutView):
         self.indicator_btn.label = f"Page {self.current_page + 1}/{self.max_pages}"
 
     async def _previous_callback(self, interaction: discord.Interaction) -> None:
+        self._sync_page_from_message(interaction.message)
         if self.loop:
             self.current_page = self.max_pages - 1 if self.current_page <= 0 else self.current_page - 1
         else:
@@ -101,6 +138,7 @@ class ButtonPaginator(discord.ui.LayoutView):
         await self.update_page(interaction)
 
     async def _next_callback(self, interaction: discord.Interaction) -> None:
+        self._sync_page_from_message(interaction.message)
         if self.loop:
             self.current_page = 0 if self.current_page >= self.max_pages - 1 else self.current_page + 1
         else:
@@ -153,7 +191,7 @@ class ButtonPaginator(discord.ui.LayoutView):
         pages: Sequence[discord.ui.Container],
         *,
         author_id: Optional[int] = None,
-        timeout: Optional[float] = 600.0,
+        timeout: Optional[float] = None,
         loop: bool = False,
     ) -> "ButtonPaginator":
         return cls(
@@ -162,3 +200,14 @@ class ButtonPaginator(discord.ui.LayoutView):
             timeout=timeout,
             loop=loop
         )
+
+    @classmethod
+    def create_persistent_paginator(cls) -> "ButtonPaginator":
+        from Source.Cogs.Dice.HelpPages import get_help_pages
+        paginator = cls(
+            get_help_pages(),
+            author_id=None,
+            timeout=None
+        )
+        paginator._render()
+        return paginator

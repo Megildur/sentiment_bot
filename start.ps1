@@ -40,5 +40,10 @@ if (Test-Path "venv\Scripts\Activate.ps1") {
 Write-Host ">>> Updating dependent libraries..." -ForegroundColor Cyan
 pip install -U -r requirements.txt
 
+Write-Host ">>> Stopping any existing bot instances..." -ForegroundColor Cyan
+try {
+    Get-CimInstance Win32_Process -Filter "Name LIKE 'python%'" | Where-Object { $_.CommandLine -like "*Main.py*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+} catch { }
+
 Write-Host ">>> Starting the bot..." -ForegroundColor Green
 python Main.py

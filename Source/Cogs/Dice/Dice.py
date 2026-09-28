@@ -75,6 +75,7 @@ class Dice(commands.Cog):
 
     @app_commands.command(name="roll_to_dye", description="Roll all available attribute dice to defend or react")
     async def roll_to_dye(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -83,7 +84,7 @@ class Dice(commands.Cog):
         all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
         if not all_attrs:
             view = NoticeView("⚠️ No Attributes", f"**{active_char}** does not have any attributes set. Use `/set_attributes` to configure them.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await interaction.followup.send(view=view)
             return
 
         wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
@@ -94,7 +95,7 @@ class Dice(commands.Cog):
 
         if not available:
             view = NoticeView("⚠️ No Dice Available", f"No attribute dice are available for **{display_name}** to Roll to Dye.\n\nAll dice are wounded, locked, or currently lent out to allies.", color=char_color)
-            await interaction.response.send_message(view=view)
+            await interaction.followup.send(view=view)
             return
 
         attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
@@ -127,10 +128,11 @@ class Dice(commands.Cog):
         pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
 
         view = RollToDyeView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, pending_support, self.db_manager)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or 1d6 Wild die to affect the world")
     async def roll_to_do(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -153,10 +155,11 @@ class Dice(commands.Cog):
 
         pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
         view = RollToDoView(self.bot, interaction.user.id, active_char, display_name, swing_info, d20_roll, d6_wild, pending_support, self.db_manager)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="roll_to_recover", description="Unlock all locked dice and roll unwounded dice to regain HP")
     async def roll_to_recover(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -203,7 +206,7 @@ class Dice(commands.Cog):
             new_hp=new_hp,
             max_hp=max_hp
         )
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="set_gm", description="choose who is the game gm")
     @app_commands.describe(user="user to set as gm")
@@ -212,6 +215,7 @@ class Dice(commands.Cog):
 
     @app_commands.command(name="set_attributes", description="View or set your character attributes")
     async def set_attributes_command(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self.db_manager.get_selected_char(interaction.user.id)
         all_chars = await self.db_manager.get_all_characters(interaction.user.id)
         
@@ -220,12 +224,12 @@ class Dice(commands.Cog):
                 active_char = all_chars[0]
                 await self.db_manager.set_selected_char(interaction.user.id, active_char)
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-            await interaction.response.send_message(view=view)
+            await interaction.followup.send(view=view)
         else:
             if active_char:
                 await self.db_manager.completely_delete_character(interaction.user.id, active_char)
             view = NoCharactersLeftView(self.bot, self.db_manager, user_id=interaction.user.id)
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await interaction.followup.send(view=view)
 
     async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         chars = await self.db_manager.get_all_characters(interaction.user.id)
@@ -272,12 +276,13 @@ class Dice(commands.Cog):
     
     @app_commands.command(name="character_card", description="Display your character card and active status")
     async def character_card(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
 
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="wound_die", description="Wound an attribute die")
     async def wound_die(self, interaction: discord.Interaction):
@@ -431,6 +436,7 @@ class Dice(commands.Cog):
     @hp.command(name="heal", description="Restore current HP for your active character (cannot exceed Max HP)")
     @app_commands.describe(amount="Amount of HP to restore")
     async def hp_heal(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -439,11 +445,12 @@ class Dice(commands.Cog):
         old_hp, new_hp, max_hp = await self.db_manager.heal_hp(interaction.user.id, active_char, amount)
         swing = await self.db_manager.get_swing(interaction.user.id, active_char)
         view = HPActionResultView(display_name, "heal", amount, old_hp, new_hp, max_hp, swing=swing)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @hp.command(name="damage", description="Deal damage to your active character's current HP")
     @app_commands.describe(amount="Amount of damage taken")
     async def hp_damage(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
@@ -464,16 +471,17 @@ class Dice(commands.Cog):
             wounded_count=len(wounded),
             swing=swing
         )
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @hp.command(name="max", description="Open the Manage Max HP submenu (Level Up Potential brackets or custom adjust)")
     async def hp_max(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         active_char = await self._ensure_active_char(interaction)
         if not active_char:
             return
 
         view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
-        await interaction.response.send_message(view=view)
+        await interaction.followup.send(view=view)
 
     @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
     @app_commands.guild_only()

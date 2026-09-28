@@ -32,7 +32,7 @@ def extract_all_text_from_message(msg: Optional[discord.Message]) -> str:
                 walk(ch)
     for comp in getattr(msg, "components", []):
         walk(comp)
-    return "\n".join(texts)
+    return chr(10).join(texts)
 
 async def check_intended_user(view, interaction: discord.Interaction, error_message: str = "❌ This menu is not for you.", allow_gm: bool = False, db_manager = None) -> bool:
     expected_user_id = getattr(view, "user_id", None)

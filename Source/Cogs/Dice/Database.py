@@ -27,100 +27,18 @@ class DiceDatabase():
             await self.db.close()
 
     async def initialize_database(self):
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS attributes (
-                user_id INTEGER,
-                char_name TEXT,
-                attribute TEXT,
-                attribute_value INTEGER,
-                PRIMARY KEY (user_id, attribute, char_name)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS attributes_names (
-                user_id INTEGER,
-                char_name TEXT,
-                attribute TEXT,
-                attribute_name TEXT,
-                PRIMARY KEY (user_id, attribute, char_name)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS support_die (
-                share_support_user_id INTEGER,
-                recieve_support_user_id INTEGER,
-                share_support_char_name TEXT,
-                recieve_support_char_name TEXT,
-                attribute TEXT,
-                attribute_name TEXT,
-                PRIMARY KEY (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS selected_char (
-                user_id INTEGER PRIMARY KEY,
-                char_name TEXT
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS gm (
-                value INTEGER PRIMARY KEY CHECK (value = 1),
-                user_id INTEGER 
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS npc (
-                value INTEGER CHECK (value = 1),
-                char_name TEXT,
-                PRIMARY KEY (value, char_name)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS swing (
-                user_id INTEGER,
-                char_name TEXT,
-                swing TEXT,
-                swing_value INTEGER,
-                PRIMARY KEY (user_id, char_name)
-                )
-            ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS wounded (
-                user_id INTEGER,
-                char_name TEXT,
-                wounded TEXT,
-                PRIMARY KEY (user_id, char_name, wounded)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS locked (
-                user_id INTEGER,
-                char_name TEXT,
-                locked TEXT,
-                PRIMARY KEY (user_id, char_name, locked)
-            )
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS hp (
-                user_id INTEGER,
-                char_name TEXT,
-                current_hp INTEGER DEFAULT 10,
-                max_hp INTEGER DEFAULT 10,
-                PRIMARY KEY (user_id, char_name)
-            )
-        ''')
-        await self.db.execute('''
-            INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp)
-            SELECT DISTINCT user_id, char_name, 10, 10 FROM attributes
-        ''')
-        await self.db.execute('''
-            CREATE TABLE IF NOT EXISTS guild_color_roles (
-                guild_id INTEGER,
-                color TEXT,
-                role_id INTEGER,
-                PRIMARY KEY (guild_id, color)
-            )
-        ''')
+        await self.db.execute("CREATE TABLE IF NOT EXISTS attributes (user_id INTEGER, char_name TEXT, attribute TEXT, attribute_value INTEGER, PRIMARY KEY (user_id, attribute, char_name))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS attributes_names (user_id INTEGER, char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (user_id, attribute, char_name))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS support_die (share_support_user_id INTEGER, recieve_support_user_id INTEGER, share_support_char_name TEXT, recieve_support_char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS selected_char (user_id INTEGER PRIMARY KEY, char_name TEXT)")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS gm (value INTEGER PRIMARY KEY CHECK (value = 1), user_id INTEGER)")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS npc (value INTEGER CHECK (value = 1), char_name TEXT, PRIMARY KEY (value, char_name))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS swing (user_id INTEGER, char_name TEXT, swing TEXT, swing_value INTEGER, PRIMARY KEY (user_id, char_name))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS wounded (user_id INTEGER, char_name TEXT, wounded TEXT, PRIMARY KEY (user_id, char_name, wounded))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS locked (user_id INTEGER, char_name TEXT, locked TEXT, PRIMARY KEY (user_id, char_name, locked))")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS hp (user_id INTEGER, char_name TEXT, current_hp INTEGER DEFAULT 10, max_hp INTEGER DEFAULT 10, PRIMARY KEY (user_id, char_name))")
+        await self.db.execute("INSERT OR IGNORE INTO hp (user_id, char_name, current_hp, max_hp) SELECT DISTINCT user_id, char_name, 10, 10 FROM attributes")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS guild_color_roles (guild_id INTEGER, color TEXT, role_id INTEGER, PRIMARY KEY (guild_id, color))")
         await self.db.commit()
 
     async def set_gm_check(self, interaction, user_id: int):

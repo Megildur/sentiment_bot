@@ -534,8 +534,6 @@ class ColorRolesConfigView(discord.ui.LayoutView):
 
         actual_guild = (self.bot.get_guild(self.guild.id) if (self.bot and self.guild) else None) or self.guild
         self.guild = actual_guild
-
-        if not self.bot: self.bot = interaction.client if "interaction" in locals() else None
         bot_member = await get_bot_member(self.bot, self.guild)
         has_manage_roles = bot_member.guild_permissions.manage_roles or bot_member.guild_permissions.administrator if bot_member else False
         bot_top_role = bot_member.top_role if bot_member else None

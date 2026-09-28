@@ -23,6 +23,8 @@ from .Views import (
     RollToRecoverView,
     get_swing_accent_color,
     ColorRolesConfigView,
+    NoCharactersLeftView,
+    get_persistent_views,
 )
 from .ColorRoles import remove_swing_color_roles, sync_member_swing_color_role
 from Source.Utils.Paginator import ButtonPaginator
@@ -37,6 +39,8 @@ class Dice(commands.Cog):
 
     async def cog_load(self) -> None:
         await self.db_manager.connect()
+        for pview in get_persistent_views(self.bot, self.db_manager):
+            self.bot.add_view(pview)
 
     async def cog_unload(self) -> None:
         await self.db_manager.close()
@@ -220,21 +224,7 @@ class Dice(commands.Cog):
         else:
             if active_char:
                 await self.db_manager.completely_delete_character(interaction.user.id, active_char)
-            view = discord.ui.LayoutView()
-            container = discord.ui.Container(
-                discord.ui.TextDisplay(content="## **Create New Character!**"),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=
-                    "You have no characters made.\n\n"
-                    "To create a new character please press the button below.\n\n"
-                    "When the menu comes up start by entering your character's name.\n"
-                    "Then select up to three colors, and select a bonus for each.\n"
-                    "Select bonuses in the same order as your colors from top to bottom in the checklist.\n\n"
-                    "**NOTE:** Only select the same number of bonuses as selected colors!\n"
-                ),
-                discord.ui.ActionRow(CreateCharButton(self.bot, self.db_manager))
-            )
-            view.add_item(container)
+            view = NoCharactersLeftView(self.bot, self.db_manager, user_id=interaction.user.id)
             await interaction.response.send_message(view=view, ephemeral=True)
 
     async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:

@@ -1,3 +1,4 @@
+import asyncio
 import discord
 import random
 import logging
@@ -12,6 +13,48 @@ from .ColorRoles import (
 )
 
 logger = logging.getLogger("sentiment.views")
+
+def resolve_context(component_or_view, interaction: discord.Interaction):
+    bot = getattr(component_or_view, "bot", None) or getattr(getattr(component_or_view, "view", None), "bot", None) or interaction.client
+    dice_cog = bot.get_cog("Dice") if bot else None
+    db_manager = getattr(component_or_view, "db_manager", None) or getattr(getattr(component_or_view, "view", None), "db_manager", None) or (getattr(dice_cog, "db_manager", None) if dice_cog else None)
+    return bot, db_manager
+
+def extract_all_text_from_message(msg: Optional[discord.Message]) -> str:
+    if not msg:
+        return ""
+    texts = [msg.content] if getattr(msg, "content", None) else []
+    def walk(comp):
+        if hasattr(comp, "content") and comp.content:
+            texts.append(comp.content)
+        if hasattr(comp, "children"):
+            for ch in comp.children:
+                walk(ch)
+    for comp in getattr(msg, "components", []):
+        walk(comp)
+    return "\n".join(texts)
+
+async def check_intended_user(view, interaction: discord.Interaction, error_message: str = "❌ This menu is not for you.", allow_gm: bool = False, db_manager = None) -> bool:
+    expected_user_id = getattr(view, "user_id", None)
+    if not expected_user_id and interaction.message:
+        meta = getattr(interaction.message, "interaction_metadata", None)
+        if meta and getattr(meta, "user", None):
+            expected_user_id = meta.user.id
+        elif getattr(interaction.message, "interaction", None):
+            expected_user_id = interaction.message.interaction.user.id
+            
+    if expected_user_id is None or interaction.user.id == expected_user_id:
+        return True
+        
+    if allow_gm:
+        if not db_manager:
+            _, db_manager = resolve_context(view, interaction)
+        if db_manager and await db_manager.is_gm(interaction.user.id):
+            return True
+
+    await interaction.response.send_message(error_message, ephemeral=True)
+    return False
+
 
 MODAL_COLOR_EMOJIS = COLOR_EMOJIS.copy()
 MODAL_COLOR_EMOJIS["Grey"] = "🔘"
@@ -37,7 +80,7 @@ class AddGMButton(discord.ui.Button):
 
 class DatabaseFailView(discord.ui.LayoutView):
     def __init__(self, bot, body, footer_text, db_manager = None, **kwargs):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.kwargs = kwargs
         self.bot=bot
 
@@ -66,7 +109,7 @@ class DatabaseFailView(discord.ui.LayoutView):
 
 class DatabaseSuccessView(discord.ui.LayoutView):
     def __init__(self, bot, body, user_id, **kwargs):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.bot = bot
         self.kwargs = kwargs
 
@@ -140,7 +183,7 @@ class SetValuesModal(discord.ui.Modal, title="Set Attributes and Bonuses"):
         await self.db_manager.set_attributes(interaction, char_name, attributes)
         await self.db_manager.set_selected_char(interaction.user.id, char_name)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
         
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=char_name, is_new=True)
         
@@ -181,14 +224,18 @@ class AttributeSetView(discord.ui.LayoutView):
             swing=swing
         )
 
-    def __init__(self, bot, interaction, db_manager, char_name: str, result: list, all_chars: list, attribute_names: dict = None, is_new: bool = False, is_gm: bool = False, is_npc: bool = False, display_name: str = None, swing: tuple = None):
+    def __init__(self, bot, interaction=None, db_manager=None, char_name: str = "", result: list = None, all_chars: list = None, attribute_names: dict = None, is_new: bool = False, is_gm: bool = False, is_npc: bool = False, display_name: str = None, swing: tuple = None, user_id: Optional[int] = None):
         super().__init__(timeout=None)
         self.bot = bot
-        self.user_id = interaction.user.id
+        self.user_id = user_id if user_id is not None else (interaction.user.id if interaction else None)
         self.char_name = char_name
         self.is_gm = is_gm
         self.is_npc = is_npc
         self.display_name = display_name or char_name
+        if result is None:
+            result = []
+        if all_chars is None:
+            all_chars = []
 
         attribute_names = attribute_names or {}
 
@@ -198,7 +245,8 @@ class AttributeSetView(discord.ui.LayoutView):
         
         results = sorted(result, key=lambda row: color_choices.index(row[0]) if row[0] in color_choices else 99)
         
-        body_lines = [f"### 📊 {interaction.user.display_name}'s Attribute Breakdown \n**Character Name:** *{self.display_name}*"]
+        user_name = interaction.user.display_name if interaction else "Player"
+        body_lines = [f"### 📊 {user_name}'s Attribute Breakdown \n**Character Name:** *{self.display_name}*"]
         for i, row in enumerate(results, start=1):
             color = row[0]
             bonus = row[1]
@@ -221,13 +269,11 @@ class AttributeSetView(discord.ui.LayoutView):
             discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
             discord.ui.TextDisplay(content="Use this select to change the character you are editing and make it your selected character!\n"),
             discord.ui.ActionRow(ChangeCharSelect(self.bot, db_manager, all_chars, active_char=self.char_name)),
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.large, visible=False),
             discord.ui.TextDisplay(content=
                                   "**NOTE:** The character selected and shown here will be the one modified when using all other commands and rolls.\n"
                                    "**IT IS YOUR ACTIVE CHARACTER**\n"
                                    "You can also change your active character before using another command or roll using the `/change_active_character` command."
             ),
-            discord.ui.Separator(visible=False),
             discord.ui.Section(
                 discord.ui.TextDisplay(content="-# Need to make a new character? Press this button!"),
                 accessory=CreateCharButton(self.bot, db_manager)
@@ -274,14 +320,7 @@ class AttributeSetView(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        
-        await interaction.response.send_message(
-            "❌ This menu is not for you.", 
-            ephemeral=True
-        )
-        return False
+        return await check_intended_user(self, interaction, "❌ This menu is not for you.", allow_gm=True, db_manager=self.db_manager)
 
 class EditAttributeSelect(discord.ui.Select):
     def __init__(self, bot, db_manager, char_name: str, result: list):
@@ -299,7 +338,7 @@ class EditAttributeSelect(discord.ui.Select):
             options = [discord.SelectOption(label="No attributes available", value="_none_")]
             disabled = True
             
-        super().__init__(placeholder="Select an attribute to edit...", min_values=1, max_values=1, options=options, disabled=disabled)
+        super().__init__(placeholder="Select an attribute to edit...", min_values=1, max_values=1, options=options, disabled=disabled, custom_id="edit_attribute_select")
 
     async def callback(self, interaction: discord.Interaction):
         selected_color = self.values[0]
@@ -334,7 +373,7 @@ class EditSingleAttributeModal(discord.ui.Modal, title="Edit Attribute"):
 
 class AddAtrsButton(discord.ui.Button):
     def __init__(self, bot, db_manager, char_name: str):
-        super().__init__(label="Add Attribute", style=discord.ButtonStyle.primary)
+        super().__init__(label="Add Attribute", style=discord.ButtonStyle.primary, custom_id="add_atrs_btn")
         self.bot = bot
         self.db_manager = db_manager
         self.char_name = char_name
@@ -377,7 +416,7 @@ class AddSingleAttributeModal(discord.ui.Modal, title="Add New Attribute"):
 
 class DeleteAtrsButton(discord.ui.Button):
     def __init__(self, bot, db_manager, char_name: str):
-        super().__init__(label="Delete Attribute", style=discord.ButtonStyle.danger)
+        super().__init__(label="Delete Attribute", style=discord.ButtonStyle.danger, custom_id="delete_atrs_btn")
         self.bot = bot
         self.db_manager = db_manager
         self.char_name = char_name
@@ -409,7 +448,7 @@ class DeleteSingleAttributeModal(discord.ui.Modal, title="Delete Attribute"):
         if not all_chars:
             await self.db_manager.completely_delete_character(interaction.user.id, self.char_name)
             if interaction.guild:
-                await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+                asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
             view = NoCharactersLeftView(self.bot, self.db_manager, deleted_char=self.char_name)
         else:
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, self.char_name, is_new=True)
@@ -442,16 +481,17 @@ class ChangeCharSelect(discord.ui.Select):
             options = [discord.SelectOption(label="No characters available", value="_none_")]
             disabled = True
         
-        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled)
+        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled, custom_id="change_char_select")
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
 
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=new_active)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 class DeleteCharSelect(discord.ui.Select):
     def __init__(self, bot, db_manager, all_chars: list, active_char: str):
@@ -464,17 +504,21 @@ class DeleteCharSelect(discord.ui.Select):
         if not options:
             options = [discord.SelectOption(label="No characters available", value="_none_")]
             disabled = True
-        super().__init__(placeholder="Delete a character permanently...", min_values=1, max_values=1, options=options, disabled=disabled)
+        super().__init__(placeholder="Delete a character permanently...", min_values=1, max_values=1, options=options, disabled=disabled, custom_id="delete_char_select")
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         char_to_delete = self.values[0]
         swing = await self.db_manager.get_swing(interaction.user.id, char_to_delete)
         view = ConfirmDeleteCharView(self.bot, self.db_manager, char_to_delete, self.active_char, swing=swing)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 class NoCharactersLeftView(discord.ui.LayoutView):
-    def __init__(self, bot, db_manager, deleted_char: str = None):
-        super().__init__(timeout=300)
+    def __init__(self, bot, db_manager, deleted_char: str = None, user_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.db_manager = db_manager
+        self.user_id = user_id
         deleted_msg = f"**{deleted_char}** was permanently deleted.\n\n" if deleted_char else ""
         container = discord.ui.Container(
             discord.ui.TextDisplay(content="## **⚠️ No Characters Remaining**"),
@@ -491,51 +535,74 @@ class NoCharactersLeftView(discord.ui.LayoutView):
         )
         self.add_item(container)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_intended_user(self, interaction, "❌ This menu is not for you.")
+
 class CancelDeleteButton(discord.ui.Button):
     def __init__(self, bot, db_manager, active_char: str):
-        super().__init__(label="Cancel", style=discord.ButtonStyle.secondary)
+        super().__init__(label="Cancel", style=discord.ButtonStyle.secondary, custom_id="cancel_delete_char_btn")
         self.bot = bot
         self.db_manager = db_manager
         self.active_char = active_char
 
     async def callback(self, interaction: discord.Interaction):
-        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
+        await interaction.response.defer()
+        bot, db_manager = resolve_context(self, interaction)
+        all_chars = await db_manager.get_all_characters(interaction.user.id)
         if not all_chars:
-            view = NoCharactersLeftView(self.bot, self.db_manager)
-            await interaction.response.edit_message(view=view)
+            view = NoCharactersLeftView(bot, db_manager, user_id=interaction.user.id)
+            await interaction.edit_original_response(view=view)
             return
 
-        target_char = self.active_char if self.active_char in all_chars else all_chars[0]
-        view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=target_char)
-        await interaction.response.edit_message(view=view)
+        active_char = getattr(self, "active_char", None) or await db_manager.get_selected_char(interaction.user.id)
+        target_char = active_char if active_char and active_char in all_chars else all_chars[0]
+        view = await AttributeSetView.build(bot, interaction, db_manager, char_name=target_char)
+        await interaction.edit_original_response(view=view)
 
 class ConfirmDeleteButton(discord.ui.Button):
     def __init__(self, bot, db_manager, char_to_delete: str, active_char: str):
-        super().__init__(label="Confirm Delete", style=discord.ButtonStyle.danger)
+        super().__init__(label="Confirm Delete", style=discord.ButtonStyle.danger, custom_id="confirm_delete_char_btn")
         self.bot = bot
         self.db_manager = db_manager
         self.char_to_delete = char_to_delete
         self.active_char = active_char
 
     async def callback(self, interaction: discord.Interaction):
-        await self.db_manager.completely_delete_character(interaction.user.id, self.char_to_delete)
+        await interaction.response.defer()
+        bot, db_manager = resolve_context(self, interaction)
+        char_to_delete = getattr(self, "char_to_delete", None)
+        if not char_to_delete and interaction.message:
+            m = re.search(r"permanently delete \*\*([^*]+)\*\*", extract_all_text_from_message(interaction.message))
+            if m:
+                char_to_delete = m.group(1).strip()
+        if not char_to_delete:
+            await interaction.followup.send("❌ Could not determine character to delete.", ephemeral=True)
+            return
+
+        await db_manager.completely_delete_character(interaction.user.id, char_to_delete)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
-        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
+            asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, interaction.user.id, db_manager))
+        all_chars = await db_manager.get_all_characters(interaction.user.id)
         
+        active_char = getattr(self, "active_char", None) or await db_manager.get_selected_char(interaction.user.id)
         if not all_chars:
-            view = NoCharactersLeftView(self.bot, self.db_manager, deleted_char=self.char_to_delete)
-            await interaction.response.edit_message(view=view)
-        elif self.char_to_delete == self.active_char or self.active_char not in all_chars:
-            view = SelectNewActiveCharView(self.bot, self.db_manager, all_chars, deleted_char=self.char_to_delete)
-            await interaction.response.edit_message(view=view)
+            view = NoCharactersLeftView(bot, db_manager, deleted_char=char_to_delete, user_id=interaction.user.id)
+            await interaction.edit_original_response(view=view)
+        elif char_to_delete == active_char or active_char not in all_chars:
+            view = SelectNewActiveCharView(bot, db_manager, all_chars, deleted_char=char_to_delete, user_id=interaction.user.id)
+            await interaction.edit_original_response(view=view)
         else:
-            view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=self.active_char)
-            await interaction.response.edit_message(view=view)
+            view = await AttributeSetView.build(bot, interaction, db_manager, char_name=active_char)
+            await interaction.edit_original_response(view=view)
 
 class ConfirmDeleteCharView(discord.ui.LayoutView):
-    def __init__(self, bot, db_manager, char_to_delete: str, active_char: str, swing: tuple = None):
-        super().__init__(timeout=300)
+    def __init__(self, bot, db_manager, char_to_delete: str = "", active_char: str = "", swing: tuple = None, user_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.db_manager = db_manager
+        self.char_to_delete = char_to_delete
+        self.active_char = active_char
+        self.user_id = user_id
         
         container = discord.ui.Container(
             discord.ui.TextDisplay(content=f"## **⚠️ Delete {char_to_delete}?**"),
@@ -551,25 +618,34 @@ class ConfirmDeleteCharView(discord.ui.LayoutView):
         )
         self.add_item(container)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_intended_user(self, interaction, "❌ This deletion confirmation is not for you.")
+
 class NewActiveCharSelect(discord.ui.Select):
     def __init__(self, bot, db_manager, all_chars: list):
         self.bot = bot
         self.db_manager = db_manager
         options = [discord.SelectOption(label=c, value=c) for c in all_chars[:25]]
-        super().__init__(placeholder="Select new active character...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Select new active character...", min_values=1, max_values=1, options=options, custom_id="new_active_char_select")
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
         
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=new_active)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 class SelectNewActiveCharView(discord.ui.LayoutView):
-    def __init__(self, bot, db_manager, all_chars: list, deleted_char: str = None, swing: tuple = None):
-        super().__init__(timeout=300)
+    def __init__(self, bot, db_manager, all_chars: list = None, deleted_char: str = None, swing: tuple = None, user_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.db_manager = db_manager
+        self.user_id = user_id
+        if all_chars is None:
+            all_chars = []
         
         title = "## **Select New Character**"
         
@@ -590,6 +666,9 @@ class SelectNewActiveCharView(discord.ui.LayoutView):
         )
         self.add_item(container)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_intended_user(self, interaction, "❌ This character menu is not for you.")
+
 class CloseMenuButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
@@ -599,11 +678,13 @@ class CloseMenuButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if not await check_intended_user(getattr(self, "view", None), interaction, "❌ You cannot close this menu.", allow_gm=True):
+            return
         await interaction.message.delete()
 
 class NameAtrsButton(discord.ui.Button):
     def __init__(self, bot, db_manager, char_name: str):
-        super().__init__(label="Name Attribute", style=discord.ButtonStyle.secondary)
+        super().__init__(label="Name Attribute", style=discord.ButtonStyle.secondary, custom_id="name_atrs_btn")
         self.bot = bot
         self.db_manager = db_manager
         self.char_name = char_name
@@ -668,17 +749,15 @@ class ToggleNPCButton(discord.ui.Button):
         if not await self.db_manager.is_gm(interaction.user.id):
             await interaction.response.send_message("❌ Only the designated GM can mark or unmark a character as an NPC.", ephemeral=True)
             return
+        await interaction.response.defer()
         await self.db_manager.toggle_npc(self.char_name)
         view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=self.char_name)
-        try:
-            await interaction.response.edit_message(view=view)
-        except discord.HTTPException:
-            await interaction.response.send_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class NoticeView(discord.ui.LayoutView):
     def __init__(self, title: str, body: str, color: Optional[discord.Color] = None):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         container = discord.ui.Container(
             discord.ui.TextDisplay(content=f"## {title}"),
             discord.ui.Separator(),
@@ -700,15 +779,16 @@ class ChangeCardCharSelect(discord.ui.Select):
         if not options:
             options = [discord.SelectOption(label="No characters available", value="_none_")]
             disabled = True
-        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled)
+        super().__init__(placeholder="Switch active character...", min_values=1, max_values=1, options=options, disabled=disabled, custom_id="change_card_char_select")
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         new_active = self.values[0]
         await self.db_manager.set_selected_char(interaction.user.id, new_active)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=new_active)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class ManageMaxHPButton(discord.ui.Button):
@@ -719,8 +799,9 @@ class ManageMaxHPButton(discord.ui.Button):
         self.char_name = char_name
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, self.char_name)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class BackToCharacterCardButton(discord.ui.Button):
@@ -731,8 +812,9 @@ class BackToCharacterCardButton(discord.ui.Button):
         self.char_name = char_name
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class PotentialFlatHPButton(discord.ui.Button):
@@ -747,6 +829,7 @@ class PotentialFlatHPButton(discord.ui.Button):
         self.flat_gain = flat_gain
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         old_cur, old_max, new_cur, new_max = await self.parent_view.db_manager.adjust_max_hp(
             self.parent_view.user_id, self.parent_view.char_name, self.flat_gain
         )
@@ -758,7 +841,7 @@ class PotentialFlatHPButton(discord.ui.Button):
         view = await ManageMaxHPView.build(
             self.parent_view.bot, interaction, self.parent_view.db_manager, self.parent_view.char_name, status_note=status_msg
         )
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class PotentialRollHPButton(discord.ui.Button):
@@ -776,6 +859,7 @@ class PotentialRollHPButton(discord.ui.Button):
         self.bracket_info = bracket_info
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         d6_val = random.randint(1, 6)
         mod = self.bracket_info["roll_mod"]
         gained = max(0, d6_val + mod)
@@ -791,7 +875,7 @@ class PotentialRollHPButton(discord.ui.Button):
         view = await ManageMaxHPView.build(
             self.parent_view.bot, interaction, self.parent_view.db_manager, self.parent_view.char_name, status_note=status_msg
         )
-        await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
 
 
 class CustomMaxHPModal(discord.ui.Modal):
@@ -900,8 +984,8 @@ class ManageMaxHPView(discord.ui.LayoutView):
             swing=swing
         )
 
-    def __init__(self, bot, user_id: int, db_manager, char_name: str, display_name: str, current_hp: int, max_hp: int, bracket_info: dict, status_note: Optional[str] = None, swing: Optional[tuple] = None):
-        super().__init__(timeout=600)
+    def __init__(self, bot, user_id: Optional[int], db_manager, char_name: str, display_name: str, current_hp: int, max_hp: int, bracket_info: dict, status_note: Optional[str] = None, swing: Optional[tuple] = None):
+        super().__init__(timeout=None)
         self.bot = bot
         self.user_id = user_id
         self.db_manager = db_manager
@@ -949,15 +1033,12 @@ class ManageMaxHPView(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("❌ This HP menu is not for you.", ephemeral=True)
-        return False
+        return await check_intended_user(self, interaction, "❌ This HP menu is not for you.")
 
 
 class HPActionResultView(discord.ui.LayoutView):
     def __init__(self, display_name: str, action_type: str, amount: int, old_hp: int, new_hp: int, max_hp: int, total_attrs: int = 3, wounded_count: int = 0, swing: Optional[tuple] = None):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         if action_type == "heal":
             title = "💚 **Character Healed**"
             actual_healed = new_hp - old_hp
@@ -1027,14 +1108,25 @@ class CharacterCardView(discord.ui.LayoutView):
             locked=locked,
             all_chars=all_chars,
             current_hp=current_hp,
-            max_hp=max_hp
+            max_hp=max_hp,
+            user_id=interaction.user.id
         )
 
-    def __init__(self, bot, interaction, db_manager, char_name: str, display_name: str, attributes: list, attribute_names: dict, swing: tuple, wounded: list, locked: list, all_chars: list, current_hp: int = 10, max_hp: int = 10):
+    def __init__(self, bot, interaction=None, db_manager=None, char_name: str = "", display_name: str = "", attributes: list = None, attribute_names: dict = None, swing: tuple = None, wounded: list = None, locked: list = None, all_chars: list = None, current_hp: int = 10, max_hp: int = 10, user_id: Optional[int] = None):
         super().__init__(timeout=None)
         self.bot = bot
-        self.user_id = interaction.user.id
+        self.user_id = user_id if user_id is not None else (interaction.user.id if interaction else None)
         self.char_name = char_name
+        if attributes is None:
+            attributes = []
+        if attribute_names is None:
+            attribute_names = {}
+        if wounded is None:
+            wounded = []
+        if locked is None:
+            locked = []
+        if all_chars is None:
+            all_chars = []
 
         accent_color = discord.Color.random()
         if swing and swing[0] in COLOR_DISCORD_COLORS:
@@ -1089,8 +1181,9 @@ class CharacterCardView(discord.ui.LayoutView):
         else:
             hp_status = f"❤️ **`{current_hp} / {max_hp} HP`**"
 
+        player_id = self.user_id or (interaction.user.id if interaction else 0)
         body = (
-            f"**Player:** <@{interaction.user.id}>\n"
+            f"**Player:** <@{player_id}>\n"
             f"**Character:** *{display_name}*\n"
             f"**Health (HP):** {hp_status}\n\n"
             f"### 🎯 Active Swing\n{swing_text}\n\n"
@@ -1116,10 +1209,7 @@ class CharacterCardView(discord.ui.LayoutView):
         self.add_item(container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("❌ This character card is not for you.", ephemeral=True)
-        return False
+        return await check_intended_user(self, interaction, "❌ This character card is not for you.")
 
 
 class WoundDieModal(discord.ui.Modal):
@@ -1149,7 +1239,7 @@ class WoundDieModal(discord.ui.Modal):
         chosen_color = self.color_select.values[0]
         await self.db_manager.wound_die(interaction.user.id, self.char_name, chosen_color)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
         await interaction.response.send_message(view=view)
 
@@ -1211,7 +1301,7 @@ class LockDieModal(discord.ui.Modal):
         chosen_color = self.color_select.values[0]
         await self.db_manager.lock_die(interaction.user.id, self.char_name, chosen_color)
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, interaction.user.id, self.db_manager))
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, self.char_name)
         await interaction.response.send_message(view=view)
 
@@ -1326,7 +1416,17 @@ class SetSwingModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         chosen_color = self.color_select.values[0]
-        await self.roll_view.update_swing(chosen_color, interaction)
+        if self.roll_view and hasattr(self.roll_view, "update_swing"):
+            await self.roll_view.update_swing(chosen_color, interaction)
+        else:
+            bot, db_manager = resolve_context(self.roll_view, interaction)
+            char_name = await db_manager.get_selected_char(interaction.user.id)
+            matching = next((c for c in self.choices if c["color"] == chosen_color), None)
+            die_val = matching["roll"] if matching else 1
+            await db_manager.set_swing(interaction.user.id, char_name, chosen_color, die_val)
+            if interaction.guild:
+                asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, interaction.user.id, db_manager))
+            await interaction.response.send_message(f"⭐ **Swing set to {chosen_color} (Die: {die_val})!**", ephemeral=True)
 
 
 class SetSwingButton(discord.ui.Button):
@@ -1335,7 +1435,26 @@ class SetSwingButton(discord.ui.Button):
         self.roll_view = roll_view
 
     async def callback(self, interaction: discord.Interaction):
-        modal = SetSwingModal(self.roll_view, self.roll_view.get_swing_choices())
+        roll_view = getattr(self, "roll_view", None) or getattr(self, "view", None)
+        choices = []
+        if roll_view and hasattr(roll_view, "get_swing_choices"):
+            choices = roll_view.get_swing_choices()
+        if not choices and interaction.message:
+            full_text = extract_all_text_from_message(interaction.message)
+            matches = re.findall(r"• [^\s]+ \*\*([A-Za-z]+)\*\* \(\*(?:None|([^*]*))\*\*?\): Die \*\*(\d+)\*\* \+ Bonus \*\*([+-]?\d+)\*\*", full_text)
+            for m in matches:
+                color = m[0]
+                name = m[1] if m[1] else "None"
+                choices.append({
+                    "color": color,
+                    "name": name,
+                    "roll": int(m[2]),
+                    "bonus": int(m[3])
+                })
+        if not choices:
+            await interaction.response.send_message("❌ No available swing choices found for this roll.", ephemeral=True)
+            return
+        modal = SetSwingModal(roll_view, choices)
         await interaction.response.send_modal(modal)
 
 
@@ -1349,16 +1468,16 @@ class ApplySupportDieButton(discord.ui.Button):
 
 
 class RollToDyeView(discord.ui.LayoutView):
-    def __init__(self, bot, user_id: int, char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, pending_support: list, db_manager):
-        super().__init__(timeout=600)
+    def __init__(self, bot, user_id: Optional[int], char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, pending_support: list, db_manager):
+        super().__init__(timeout=None)
         self.bot = bot
         self.user_id = user_id
         self.char_name = char_name
         self.display_name = display_name
-        self.rolled_dice = rolled_dice  # list of dicts: {'color', 'name', 'roll', 'bonus', 'is_swing'}
-        self.swing_info = swing_info    # (swing_color, swing_val, swing_bonus) or None
-        self.pending_support = pending_support  # list of dicts from support_die
-        self.support_rolls = []         # applied support dice
+        self.rolled_dice = rolled_dice
+        self.swing_info = swing_info
+        self.pending_support = pending_support
+        self.support_rolls = []
         self.db_manager = db_manager
         self.render_view()
 
@@ -1368,7 +1487,6 @@ class RollToDyeView(discord.ui.LayoutView):
     def render_view(self):
         self.clear_items()
 
-        # Recalculate total
         total = 0
         dice_lines = []
         for d in self.rolled_dice:
@@ -1465,7 +1583,7 @@ class RollToDyeView(discord.ui.LayoutView):
             attribute=item["attribute"]
         )
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager))
 
         self.render_view()
         try:
@@ -1474,20 +1592,17 @@ class RollToDyeView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("❌ This roll is not yours to modify.", ephemeral=True)
-        return False
+        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.")
 
 
 class RollToDoView(discord.ui.LayoutView):
-    def __init__(self, bot, user_id: int, char_name: str, display_name: str, swing_info: tuple, d20_roll: int, d6_wild: int, pending_support: list, db_manager):
-        super().__init__(timeout=600)
+    def __init__(self, bot, user_id: Optional[int], char_name: str, display_name: str, swing_info: tuple, d20_roll: int, d6_wild: int, pending_support: list, db_manager):
+        super().__init__(timeout=None)
         self.bot = bot
         self.user_id = user_id
         self.char_name = char_name
         self.display_name = display_name
-        self.swing_info = swing_info  # (color, custom_name, swing_val, bonus) or None
+        self.swing_info = swing_info
         self.d20_roll = d20_roll
         self.d6_wild = d6_wild
         self.pending_support = pending_support
@@ -1568,7 +1683,7 @@ class RollToDoView(discord.ui.LayoutView):
             attribute=item["attribute"]
         )
         if interaction.guild:
-            await sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager)
+            asyncio.create_task(sync_member_swing_color_role(self.bot, interaction.guild, item["share_user_id"], self.db_manager))
 
         self.render_view()
         try:
@@ -1577,21 +1692,18 @@ class RollToDoView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("❌ This roll is not yours to modify.", ephemeral=True)
-        return False
+        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.")
 
 
 class RollToRecoverView(discord.ui.LayoutView):
-    def __init__(self, bot, user_id: int, char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, db_manager, old_hp: int = 10, new_hp: int = 10, max_hp: int = 10):
-        super().__init__(timeout=600)
+    def __init__(self, bot, user_id: Optional[int], char_name: str, display_name: str, rolled_dice: list, swing_info: tuple, db_manager, old_hp: int = 10, new_hp: int = 10, max_hp: int = 10):
+        super().__init__(timeout=None)
         self.bot = bot
         self.user_id = user_id
         self.char_name = char_name
         self.display_name = display_name
-        self.rolled_dice = rolled_dice  # list of dicts: {'color', 'name', 'roll', 'bonus'}
-        self.swing_info = swing_info    # (swing_color, swing_val, swing_bonus) or None
+        self.rolled_dice = rolled_dice
+        self.swing_info = swing_info
         self.db_manager = db_manager
         self.old_hp = old_hp
         self.new_hp = new_hp
@@ -1674,8 +1786,101 @@ class RollToRecoverView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("❌ This roll is not yours to modify.", ephemeral=True)
-        return False
+        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.")
 
+
+
+def get_persistent_views(bot, db_manager) -> list[discord.ui.LayoutView]:
+    views = []
+
+    v_attrs = AttributeSetView(
+        bot=bot,
+        interaction=None,
+        db_manager=db_manager,
+        char_name="",
+        result=[],
+        all_chars=[],
+        is_gm=True,
+        user_id=None
+    )
+    views.append(v_attrs)
+
+    v_delete = ConfirmDeleteCharView(bot=bot, db_manager=db_manager, char_to_delete="", active_char="", user_id=None)
+    views.append(v_delete)
+
+    v_select = SelectNewActiveCharView(bot=bot, db_manager=db_manager, all_chars=[], user_id=None)
+    views.append(v_select)
+
+    v_none = NoCharactersLeftView(bot=bot, db_manager=db_manager, user_id=None)
+    views.append(v_none)
+
+    v_card = CharacterCardView(
+        bot=bot,
+        interaction=None,
+        db_manager=db_manager,
+        char_name="",
+        display_name="",
+        attributes=[],
+        attribute_names={},
+        swing=None,
+        wounded=[],
+        locked=[],
+        all_chars=[],
+        user_id=None
+    )
+    views.append(v_card)
+
+    v_hp = ManageMaxHPView(
+        bot=bot,
+        user_id=None,
+        db_manager=db_manager,
+        char_name="",
+        display_name="",
+        current_hp=10,
+        max_hp=10,
+        bracket_info={"bracket": "10-19", "flat_gain": 5, "can_roll": True, "roll_label": "1d6 + 1", "roll_mod": 1}
+    )
+    views.append(v_hp)
+
+    v_dye = RollToDyeView(
+        bot=bot,
+        user_id=None,
+        char_name="",
+        display_name="",
+        rolled_dice=[],
+        swing_info=None,
+        pending_support=[{"color": "Red", "bonus": 0, "share_user_id": 0, "share_char": "", "attribute": "Red"}],
+        db_manager=db_manager
+    )
+    views.append(v_dye)
+
+    v_do = RollToDoView(
+        bot=bot,
+        user_id=None,
+        char_name="",
+        display_name="",
+        swing_info=None,
+        d20_roll=1,
+        d6_wild=1,
+        pending_support=[{"color": "Red", "bonus": 0, "share_user_id": 0, "share_char": "", "attribute": "Red"}],
+        db_manager=db_manager
+    )
+    views.append(v_do)
+
+    v_rec = RollToRecoverView(
+        bot=bot,
+        user_id=None,
+        char_name="",
+        display_name="",
+        rolled_dice=[],
+        swing_info=None,
+        db_manager=db_manager
+    )
+    views.append(v_rec)
+
+    v_fail = DatabaseFailView(bot=bot, body="", footer_text="", db_manager=db_manager, change=0)
+    views.append(v_fail)
+
+    views.append(ColorRolesConfigView.get_persistent_view(bot=bot, db_manager=db_manager))
+
+    return views

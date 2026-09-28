@@ -5,7 +5,6 @@ try {
     Write-Host "[!] Warning: git pull failed or local changes exist. Continuing..." -ForegroundColor Yellow
 }
 
-# Find Python interpreter
 function Find-Python {
     $candidates = @("python3.14", "python3", "python", "py", "$env:USERPROFILE\.local\bin\python3.14.exe")
     foreach ($cand in $candidates) {
@@ -19,7 +18,6 @@ function Find-Python {
     return $null
 }
 
-# 1. Create venv if missing
 if (-not (Test-Path "venv")) {
     Write-Host ">>> Virtual environment not found. Creating 'venv'..." -ForegroundColor Cyan
     $py = Find-Python
@@ -31,7 +29,6 @@ if (-not (Test-Path "venv")) {
     & $py -m venv venv
 }
 
-# 2. Activate virtual environment
 Write-Host ">>> Activating virtual environment..." -ForegroundColor Cyan
 if (Test-Path "venv\Scripts\Activate.ps1") {
     . .\venv\Scripts\Activate.ps1
@@ -40,11 +37,8 @@ if (Test-Path "venv\Scripts\Activate.ps1") {
     $env:PATH = "$PSScriptRoot\venv\Scripts;$env:PATH"
 }
 
-# 3. Install / update dependencies
 Write-Host ">>> Updating dependent libraries..." -ForegroundColor Cyan
 pip install -U -r requirements.txt
 
-# 4. Start the bot
 Write-Host ">>> Starting the bot..." -ForegroundColor Green
 python Main.py
-

@@ -7,10 +7,6 @@ logger = logging.getLogger("sentiment.color_roles")
 
 
 async def get_bot_member(bot, guild: discord.Guild) -> Optional[discord.Member]:
-    """
-    Retrieves the bot's actual Member object in the guild with full roles and permissions.
-    Avoids discord.py's Interaction.guild.me fallback which defaults to roles=[] (@everyone only).
-    """
     if not guild or not bot:
         return None
 
@@ -20,12 +16,10 @@ async def get_bot_member(bot, guild: discord.Guild) -> Optional[discord.Member]:
     if not bot_user_id:
         return actual_guild.me
 
-    # Check if cached member has custom roles (more than @everyone)
     cached_member = actual_guild.get_member(bot_user_id)
     if cached_member and len(cached_member.roles) > 1:
         return cached_member
 
-    # Fetch fresh member directly from Discord REST API to guarantee all roles are loaded
     try:
         fetched_member = await actual_guild.fetch_member(bot_user_id)
         if fetched_member:
@@ -37,9 +31,6 @@ async def get_bot_member(bot, guild: discord.Guild) -> Optional[discord.Member]:
 
 
 async def get_guild_member(guild: discord.Guild, user_or_member: Any) -> Optional[discord.Member]:
-    """
-    Ensures we have a discord.Member instance in the guild even if a discord.User, discord.Member, or int ID was passed.
-    """
     if not guild or user_or_member is None:
         return None
 
@@ -63,36 +54,26 @@ async def get_guild_member(guild: discord.Guild, user_or_member: Any) -> Optiona
 
 
 def is_higher_than(higher_role: Optional[discord.Role], lower_role: Optional[discord.Role]) -> bool:
-    """Safely checks if higher_role is strictly higher in the hierarchy than lower_role."""
     if not higher_role or not lower_role:
         return False
     return getattr(higher_role, "position", 0) > getattr(lower_role, "position", 0)
 
 
 async def get_or_create_color_role(guild: discord.Guild, db_manager, color_name: str, bot=None) -> Optional[discord.Role]:
-    """
-    Finds or creates a role for the specified Sentiment color.
-    1. Checks database mapping for the guild.
-    2. If not mapped or role was deleted, searches existing roles in the guild by name.
-    3. If not found, creates the role with the matching accent color.
-    """
     if not guild:
         return None
 
     actual_guild = (bot.get_guild(guild.id) if bot else None) or guild
 
-    # 1. Check DB mapping
     role_id = await db_manager.get_guild_color_role(actual_guild.id, color_name)
     if role_id:
         role = actual_guild.get_role(role_id)
         if role is not None:
             return role
-        # Role was deleted in guild, clean up stale DB entry
         await db_manager.delete_guild_color_role(actual_guild.id, color_name)
 
     desired_color = COLOR_DISCORD_COLORS.get(color_name)
 
-    # 2. Search existing roles by name (case-insensitive)
     matching_role = next(
         (r for r in actual_guild.roles if r.name.strip().lower() == color_name.lower()),
         None
@@ -110,7 +91,6 @@ async def get_or_create_color_role(guild: discord.Guild, db_manager, color_name:
         await db_manager.set_guild_color_role(actual_guild.id, color_name, matching_role.id)
         return matching_role
 
-    # 3. Create role if not found
     bot_member = await get_bot_member(bot, actual_guild) if bot else actual_guild.me
     can_create = bot_member and (bot_member.guild_permissions.manage_roles or bot_member.guild_permissions.administrator)
 
@@ -132,24 +112,18 @@ async def get_or_create_color_role(guild: discord.Guild, db_manager, color_name:
 
 
 async def get_all_guild_color_roles(guild: discord.Guild, db_manager, bot=None) -> List[discord.Role]:
-    """
-    Returns a deduplicated list of all roles in the guild that represent any of the 10 Sentiment colors.
-    Includes roles in the database and roles whose names match any of the color names.
-    """
     if not guild:
         return []
 
     actual_guild = (bot.get_guild(guild.id) if bot else None) or guild
     roles = set()
 
-    # From DB
     db_roles = await db_manager.get_guild_color_roles(actual_guild.id)
     for color, r_id in db_roles.items():
         role = actual_guild.get_role(r_id)
         if role:
             roles.add(role)
 
-    # From role names
     color_names_lower = {c.lower() for c in COLOR_ORDER}
     for r in actual_guild.roles:
         if r.name.strip().lower() in color_names_lower:
@@ -159,11 +133,6 @@ async def get_all_guild_color_roles(guild: discord.Guild, db_manager, bot=None) 
 
 
 async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any, db_manager, chosen_color: str) -> Dict[str, Any]:
-    """
-    Assigns the color role matching chosen_color to the member, and strips any other color roles they hold.
-    Returns a dictionary with execution status and details:
-    {'success': bool, 'role': Optional[Role], 'error': Optional[str]}
-    """
     result = {"success": False, "role": None, "error": None}
 
     if not guild:
@@ -190,7 +159,6 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
     all_color_roles = await get_all_guild_color_roles(actual_guild, db_manager, bot=bot)
     all_color_role_ids = {r.id for r in all_color_roles}
 
-    # Roles to remove: any color role the member currently holds except target_role
     roles_to_remove = [r for r in member.roles if r.id in all_color_role_ids and r.id != target_role.id]
 
     bot_top_pos = getattr(bot_member.top_role, 'position', 0)
@@ -206,7 +174,6 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
         logger.warning(f"Bot top role {bot_member.top_role.name} (pos {bot_top_pos}) is not higher than color role {target_role.name} (pos {target_role.position})")
         return result
 
-    # Remove old swing color roles
     if roles_to_remove:
         removable = [r for r in roles_to_remove if bot_top_pos > getattr(r, 'position', 0)]
         if removable:
@@ -217,7 +184,6 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
             except Exception as e:
                 logger.warning(f"Error removing old roles from {member.display_name}: {e}")
 
-    # Add new swing color role
     member_role_ids = {r.id for r in member.roles}
     if target_role.id not in member_role_ids:
         try:
@@ -236,9 +202,6 @@ async def assign_swing_color_role(bot, guild: discord.Guild, user_or_member: Any
 
 
 async def remove_swing_color_roles(bot, guild: discord.Guild, user_or_member: Any, db_manager) -> List[discord.Role]:
-    """
-    Removes all Sentiment color roles currently held by the member.
-    """
     if not guild:
         return []
 
@@ -272,9 +235,6 @@ async def remove_swing_color_roles(bot, guild: discord.Guild, user_or_member: An
 
 
 async def sync_member_swing_color_role(bot, guild: discord.Guild, user_id: int, db_manager) -> Dict[str, Any]:
-    """
-    Syncs a member's swing color role to their active character's current swing state.
-    """
     if not guild:
         return {"success": False, "error": "no_guild"}
 
@@ -294,9 +254,6 @@ async def sync_member_swing_color_role(bot, guild: discord.Guild, user_id: int, 
 
 
 async def auto_setup_all_color_roles(guild: discord.Guild, db_manager, bot=None) -> Dict[str, Optional[discord.Role]]:
-    """
-    Iterates through all 10 Sentiment colors, searching or creating each role and binding to DB.
-    """
     mappings = {}
     actual_guild = (bot.get_guild(guild.id) if bot else None) or guild
     for color in COLOR_ORDER:
@@ -306,14 +263,9 @@ async def auto_setup_all_color_roles(guild: discord.Guild, db_manager, bot=None)
 
 
 async def sync_all_server_members(bot, guild: discord.Guild, db_manager) -> Dict[str, int]:
-    """
-    Syncs swing color roles for all players in the server who have an active character.
-    Returns stats: {'synced': count, 'colorless': count}
-    """
     actual_guild = (bot.get_guild(guild.id) if bot else None) or guild
     stats = {"synced": 0, "colorless": 0}
 
-    # Query all users with selected characters
     async with db_manager.db_lock:
         cursor = await db_manager.db.execute("SELECT user_id, char_name FROM selected_char")
         rows = await cursor.fetchall()
@@ -354,7 +306,8 @@ class ColorSelectComponent(discord.ui.Select):
             placeholder="Select a color to configure or assign a role to...",
             options=options,
             min_values=1,
-            max_values=1
+            max_values=1,
+            custom_id="color_select_comp"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -367,7 +320,8 @@ class RoleSelectComponent(discord.ui.RoleSelect):
         super().__init__(
             placeholder=f"Pick an existing server role for {selected_color}...",
             min_values=1,
-            max_values=1
+            max_values=1,
+            custom_id="role_select_comp"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -379,7 +333,6 @@ class RoleSelectComponent(discord.ui.RoleSelect):
 
         await self.view.db_manager.set_guild_color_role(interaction.guild.id, color_name, selected_role.id)
 
-        # Update role color to match accent color if needed and possible
         bot_member = await get_bot_member(self.view.bot, interaction.guild)
         desired_color = COLOR_DISCORD_COLORS.get(color_name)
         if desired_color and selected_role.color.value != desired_color.value:
@@ -433,9 +386,13 @@ class SyncMyRoleButton(discord.ui.Button):
             await interaction.response.send_message("❌ This action can only be used inside a server.", ephemeral=True)
             return
 
-        actual_guild = self.view.bot.get_guild(interaction.guild.id) or interaction.guild
+        bot = getattr(self.view, "bot", None) or interaction.client
+        dice_cog = bot.get_cog("Dice") if bot else None
+        db_manager = getattr(self.view, "db_manager", None) or (getattr(dice_cog, "db_manager", None) if dice_cog else None)
 
-        active_char = await self.view.db_manager.get_selected_char(interaction.user.id)
+        actual_guild = bot.get_guild(interaction.guild.id) or interaction.guild
+
+        active_char = await db_manager.get_selected_char(interaction.user.id) if db_manager else None
         if not active_char:
             await interaction.response.send_message(
                 "❌ You do not have an active character selected! Use `/set_attributes` or `/change_active_character` first.",
@@ -443,9 +400,9 @@ class SyncMyRoleButton(discord.ui.Button):
             )
             return
 
-        swing = await self.view.db_manager.get_swing(interaction.user.id, active_char)
+        swing = await db_manager.get_swing(interaction.user.id, active_char)
         if not swing:
-            await remove_swing_color_roles(self.view.bot, actual_guild, interaction.user, self.view.db_manager)
+            await remove_swing_color_roles(bot, actual_guild, interaction.user, db_manager)
             await interaction.response.send_message(
                 f"ℹ️ Your active character *{active_char}* has no active Swing. Removed all swing color roles.",
                 ephemeral=True
@@ -456,10 +413,10 @@ class SyncMyRoleButton(discord.ui.Button):
         emoji = COLOR_EMOJIS.get(chosen_color, "⚪")
 
         sync_result = await assign_swing_color_role(
-            self.view.bot,
+            bot,
             actual_guild,
             interaction.user,
-            self.view.db_manager,
+            db_manager,
             chosen_color
         )
 
@@ -524,14 +481,28 @@ class ResetRoleButton(discord.ui.Button):
 
 class ColorRolesConfigView(discord.ui.LayoutView):
     @classmethod
+    def get_persistent_view(cls, bot=None, db_manager=None):
+        view = cls(bot=bot, guild=None, db_manager=db_manager, selected_color="Red")
+        view.clear_items()
+        view.add_item(discord.ui.ActionRow(ColorSelectComponent("Red")))
+        view.add_item(discord.ui.ActionRow(RoleSelectComponent("Red")))
+        view.add_item(discord.ui.ActionRow(
+            AutoSetupButton(),
+            SyncMyRoleButton(),
+            SyncAllPlayersButton(),
+            ResetRoleButton()
+        ))
+        return view
+
+    @classmethod
     async def build(cls, bot, guild: discord.Guild, db_manager, selected_color: str = "Red"):
         actual_guild = (bot.get_guild(guild.id) if (bot and guild) else None) or guild
         view = cls(bot=bot, guild=actual_guild, db_manager=db_manager, selected_color=selected_color)
         await view.render_view()
         return view
 
-    def __init__(self, bot, guild: discord.Guild, db_manager, selected_color: str = "Red"):
-        super().__init__(timeout=600)
+    def __init__(self, bot=None, guild: Optional[discord.Guild] = None, db_manager=None, selected_color: str = "Red"):
+        super().__init__(timeout=None)
         self.bot = bot
         self.guild = guild
         self.db_manager = db_manager
@@ -542,8 +513,14 @@ class ColorRolesConfigView(discord.ui.LayoutView):
             await interaction.response.send_message("❌ This command can only be used inside a server.", ephemeral=True)
             return False
 
+        if not self.bot:
+            self.bot = interaction.client
+        if not self.db_manager:
+            dice_cog = self.bot.get_cog("Dice") if self.bot else None
+            self.db_manager = getattr(dice_cog, "db_manager", None) if dice_cog else None
+
         is_admin = interaction.user.guild_permissions.manage_roles or interaction.user.guild_permissions.administrator
-        is_gm = await self.db_manager.is_gm(interaction.user.id)
+        is_gm = await self.db_manager.is_gm(interaction.user.id) if self.db_manager else False
         if not (is_admin or is_gm):
             await interaction.response.send_message(
                 "❌ You need the **Manage Roles** permission or to be the designated **GM** to modify server color roles.",
@@ -558,6 +535,7 @@ class ColorRolesConfigView(discord.ui.LayoutView):
         actual_guild = (self.bot.get_guild(self.guild.id) if (self.bot and self.guild) else None) or self.guild
         self.guild = actual_guild
 
+        if not self.bot: self.bot = interaction.client if "interaction" in locals() else None
         bot_member = await get_bot_member(self.bot, self.guild)
         has_manage_roles = bot_member.guild_permissions.manage_roles or bot_member.guild_permissions.administrator if bot_member else False
         bot_top_role = bot_member.top_role if bot_member else None
@@ -574,7 +552,6 @@ class ColorRolesConfigView(discord.ui.LayoutView):
             role = self.guild.get_role(mapped_id) if (self.guild and mapped_id) else None
 
             if not role and self.guild:
-                # Search by role name
                 matching = next((r for r in self.guild.roles if r.name.strip().lower() == color.lower()), None)
                 if matching:
                     role = matching
@@ -664,6 +641,13 @@ class ColorRolesConfigView(discord.ui.LayoutView):
         self.add_item(container)
 
     async def refresh(self, interaction: discord.Interaction, is_followup: bool = False, notice: Optional[str] = None):
+        if not self.bot:
+            self.bot = interaction.client
+        if not self.guild:
+            self.guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
+        if not self.db_manager:
+            dice_cog = self.bot.get_cog("Dice") if self.bot else None
+            self.db_manager = getattr(dice_cog, "db_manager", None) if dice_cog else None
         await self.render_view(notice=notice)
         if is_followup:
             await interaction.edit_original_response(view=self)

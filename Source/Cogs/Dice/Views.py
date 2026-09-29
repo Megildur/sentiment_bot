@@ -77,7 +77,7 @@ async def get_effective_char_and_user(component_or_view, interaction: discord.In
             if char_name.endswith(" (NPC)"):
                 char_name = char_name[:-6].strip()
         else:
-            m_do = re.search(r"^\*([^*]+)\*\s+rolled for", full_text, re.MULTILINE)
+            m_do = re.search(r"^\*([^*]+)\*\s+rolled (?:for|to do)", full_text, re.MULTILINE)
             if m_do:
                 char_name = m_do.group(1).strip()
                 if char_name.endswith(" (NPC)"):
@@ -89,6 +89,32 @@ async def get_effective_char_and_user(component_or_view, interaction: discord.In
     return user_id, char_name
 
 
+def disable_all_view_items(msg) -> Optional[discord.ui.LayoutView | discord.ui.View]:
+    new_view = None
+    try:
+        new_view = discord.ui.LayoutView.from_message(msg, timeout=None)
+    except Exception:
+        try:
+            new_view = discord.ui.View.from_message(msg, timeout=None)
+        except Exception:
+            new_view = None
+
+    if new_view is not None:
+        def walk(item):
+            if hasattr(item, "disabled"):
+                item.disabled = True
+            if hasattr(item, "children"):
+                for child in item.children:
+                    walk(child)
+            if hasattr(item, "accessory") and item.accessory:
+                walk(item.accessory)
+
+        for c in getattr(new_view, "children", []):
+            walk(c)
+
+    return new_view
+
+
 async def update_user_active_character_views(bot, db_manager, user_id: int, new_char_name: str, exclude_message_id: Optional[int] = None):
     if not db_manager or not bot or not user_id:
         return
@@ -96,7 +122,9 @@ async def update_user_active_character_views(bot, db_manager, user_id: int, new_
     if not views_to_update:
         return
 
-    for channel_id, message_id, view_type in views_to_update:
+    for entry in views_to_update:
+        channel_id, message_id, view_type = entry[0], entry[1], entry[2]
+        tracked_char = entry[3] if len(entry) > 3 else ""
         if exclude_message_id and message_id == exclude_message_id:
             continue
         try:
@@ -118,16 +146,35 @@ async def update_user_active_character_views(bot, db_manager, user_id: int, new_
                 continue
 
             new_view = None
-            if not new_char_name:
-                new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
-                await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView")
-            elif view_type in ("AttributeSetView", "NoCharactersLeftView"):
-                new_view = await AttributeSetView.build_for_user(bot, user_id, db_manager, new_char_name)
-                await db_manager.track_active_view(user_id, channel_id, message_id, "AttributeSetView")
+            if view_type in ("AttributeSetView", "NoCharactersLeftView"):
+                if not new_char_name:
+                    new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView", "")
+                else:
+                    new_view = await AttributeSetView.build_for_user(bot, user_id, db_manager, new_char_name)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "AttributeSetView", new_char_name)
             elif view_type == "CharacterCardView":
-                new_view = await CharacterCardView.build_for_user(bot, user_id, db_manager, new_char_name)
+                if not new_char_name:
+                    new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView", "")
+                else:
+                    new_view = await CharacterCardView.build_for_user(bot, user_id, db_manager, new_char_name)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "CharacterCardView", new_char_name)
             elif view_type == "ManageMaxHPView":
-                new_view = await ManageMaxHPView.build_for_user(bot, user_id, db_manager, new_char_name)
+                if not new_char_name:
+                    new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView", "")
+                else:
+                    new_view = await ManageMaxHPView.build_for_user(bot, user_id, db_manager, new_char_name)
+                    await db_manager.track_active_view(user_id, channel_id, message_id, "ManageMaxHPView", new_char_name)
+            else:
+                roll_char = tracked_char
+                if not roll_char and msg:
+                    fake_inter = type("FakeInter", (), {"message": msg, "user": type("U", (), {"id": user_id})()})()
+                    _, roll_char = await get_effective_char_and_user(None, fake_inter, db_manager)
+                if not new_char_name or (roll_char and roll_char != new_char_name) or (not roll_char):
+                    new_view = disable_all_view_items(msg)
+                    await db_manager.untrack_active_view(message_id)
 
             if new_view is not None:
                 await msg.edit(view=new_view)
@@ -164,6 +211,38 @@ async def check_intended_user(view, interaction: discord.Interaction, error_mess
 
     await interaction.response.send_message(error_message, ephemeral=True)
     return False
+
+
+async def check_roll_active_character(view, interaction: discord.Interaction) -> bool:
+    allowed = await check_intended_user(view, interaction, "❌ This roll is not yours to modify.", allow_gm=True, db_manager=getattr(view, "db_manager", None))
+    if not allowed:
+        return False
+
+    bot, db_manager = resolve_context(view, interaction)
+    roll_char = getattr(view, "char_name", "")
+    if db_manager:
+        user_id, resolved_char = await get_effective_char_and_user(view, interaction, db_manager)
+        roll_char = roll_char or resolved_char
+        active_char = await db_manager.get_selected_char(user_id)
+        if roll_char and active_char and roll_char != active_char:
+            await interaction.response.send_message(
+                f"❌ This roll belongs to **{roll_char}**, but your active character is now **{active_char}**.",
+                ephemeral=True
+            )
+            if interaction.message:
+                new_view = disable_all_view_items(interaction.message)
+                if new_view is not None:
+                    try:
+                        await interaction.message.edit(view=new_view)
+                    except Exception:
+                        pass
+                await db_manager.untrack_active_view(interaction.message.id)
+            return False
+
+    if interaction.message and db_manager:
+        uid = getattr(view, "user_id", None) or interaction.user.id
+        asyncio.create_task(db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, type(view).__name__, char_name=roll_char))
+    return True
 
 
 MODAL_COLOR_EMOJIS = COLOR_EMOJIS.copy()
@@ -315,7 +394,7 @@ class SetValuesModal(discord.ui.Modal, title="Set Attributes and Bonuses"):
             try:
                 await interaction.response.edit_message(view=view)
                 if interaction.message:
-                    await self.db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+                    await self.db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "AttributeSetView", char_name)
                     asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, char_name, exclude_message_id=interaction.message.id))
             except discord.HTTPException:
                 await interaction.response.send_message(view=view)
@@ -457,7 +536,8 @@ class AttributeSetView(discord.ui.LayoutView):
         allowed = await check_intended_user(self, interaction, "❌ This menu is not for you.", allow_gm=True, db_manager=getattr(self, "db_manager", None))
         if allowed and interaction.message and getattr(self, "db_manager", None):
             uid = getattr(self, "user_id", None) or interaction.user.id
-            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "AttributeSetView"))
+            cname = getattr(self, "char_name", "")
+            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "AttributeSetView", cname))
         return allowed
 
 class EditAttributeSelect(discord.ui.Select):
@@ -519,7 +599,7 @@ class EditSingleAttributeModal(discord.ui.Modal, title="Edit Attribute"):
         try:
             await interaction.response.edit_message(view=view)
             if interaction.message and db_manager:
-                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView", char_name)
                 asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id))
         except discord.HTTPException:
             await interaction.response.send_message(view=view)
@@ -571,7 +651,7 @@ class AddSingleAttributeModal(discord.ui.Modal, title="Add New Attribute"):
         try:
             await interaction.response.edit_message(view=view)
             if interaction.message and db_manager:
-                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView", char_name)
                 asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id))
         except discord.HTTPException:
             await interaction.response.send_message(view=view)
@@ -625,7 +705,7 @@ class DeleteSingleAttributeModal(discord.ui.Modal, title="Delete Attribute"):
             await interaction.response.edit_message(view=view)
             if interaction.message and db_manager:
                 vtype = "NoCharactersLeftView" if not all_chars else "AttributeSetView"
-                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, vtype)
+                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, vtype, "" if not all_chars else char_name)
                 asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, "" if not all_chars else char_name, exclude_message_id=interaction.message.id))
         except discord.HTTPException:
             await interaction.response.send_message(view=view)
@@ -666,7 +746,7 @@ class ChangeCharSelect(discord.ui.Select):
             asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, user_id, db_manager))
 
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView", new_active)
 
         view = await AttributeSetView.build(bot, interaction, db_manager, char_name=new_active)
         await interaction.edit_original_response(view=view)
@@ -721,7 +801,7 @@ class NoCharactersLeftView(discord.ui.LayoutView):
         allowed = await check_intended_user(self, interaction, "❌ This menu is not for you.")
         if allowed and interaction.message and getattr(self, "db_manager", None):
             uid = getattr(self, "user_id", None) or interaction.user.id
-            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "NoCharactersLeftView"))
+            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "NoCharactersLeftView", ""))
         return allowed
 
 class CancelDeleteButton(discord.ui.Button):
@@ -773,7 +853,7 @@ class ConfirmDeleteButton(discord.ui.Button):
         active_char = getattr(self, "active_char", None) or await db_manager.get_selected_char(interaction.user.id)
         if not all_chars:
             if db_manager and interaction.message:
-                await db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "NoCharactersLeftView")
+                await db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "NoCharactersLeftView", "")
             asyncio.create_task(update_user_active_character_views(bot, db_manager, interaction.user.id, "", exclude_message_id=interaction.message.id if interaction.message else None))
             view = NoCharactersLeftView(bot, db_manager, deleted_char=char_to_delete, user_id=interaction.user.id)
             await interaction.edit_original_response(view=view)
@@ -782,7 +862,7 @@ class ConfirmDeleteButton(discord.ui.Button):
             await interaction.edit_original_response(view=view)
         else:
             if db_manager and interaction.message:
-                await db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+                await db_manager.track_active_view(interaction.user.id, interaction.channel_id, interaction.message.id, "AttributeSetView", active_char)
             asyncio.create_task(update_user_active_character_views(bot, db_manager, interaction.user.id, active_char, exclude_message_id=interaction.message.id if interaction.message else None))
             view = await AttributeSetView.build(bot, interaction, db_manager, char_name=active_char)
             await interaction.edit_original_response(view=view)
@@ -830,7 +910,7 @@ class NewActiveCharSelect(discord.ui.Select):
             asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, user_id, db_manager))
         
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView", new_active)
 
         view = await AttributeSetView.build(bot, interaction, db_manager, char_name=new_active)
         await interaction.edit_original_response(view=view)
@@ -945,7 +1025,7 @@ class NameAttributeModal(discord.ui.Modal, title="Name Attribute"):
         try:
             await interaction.response.edit_message(view=view)
             if interaction.message and db_manager:
-                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView")
+                await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "AttributeSetView", char_name)
                 asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id))
         except discord.HTTPException:
             await interaction.response.send_message(view=view)
@@ -1009,7 +1089,7 @@ class ChangeCardCharSelect(discord.ui.Select):
             asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, user_id, db_manager))
 
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "CharacterCardView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "CharacterCardView", new_active)
 
         view = await CharacterCardView.build(bot, interaction, db_manager, char_name=new_active)
         await interaction.edit_original_response(view=view)
@@ -1031,7 +1111,7 @@ class ManageMaxHPButton(discord.ui.Button):
         view = await ManageMaxHPView.build(bot, interaction, db_manager, char_name)
         await interaction.edit_original_response(view=view)
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView", char_name)
 
 
 class BackToCharacterCardButton(discord.ui.Button):
@@ -1049,7 +1129,7 @@ class BackToCharacterCardButton(discord.ui.Button):
         view = await CharacterCardView.build(bot, interaction, db_manager, char_name)
         await interaction.edit_original_response(view=view)
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "CharacterCardView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "CharacterCardView", char_name)
 
 
 class PotentialFlatHPButton(discord.ui.Button):
@@ -1083,7 +1163,7 @@ class PotentialFlatHPButton(discord.ui.Button):
         )
         await interaction.edit_original_response(view=view)
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView", char_name)
         asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id if interaction.message else None))
 
 
@@ -1127,7 +1207,7 @@ class PotentialRollHPButton(discord.ui.Button):
         )
         await interaction.edit_original_response(view=view)
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView", char_name)
         asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id if interaction.message else None))
 
 
@@ -1199,7 +1279,7 @@ class CustomMaxHPModal(discord.ui.Modal):
         )
         await interaction.response.edit_message(view=view)
         if db_manager and interaction.message:
-            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView")
+            await db_manager.track_active_view(user_id, interaction.channel_id, interaction.message.id, "ManageMaxHPView", char_name)
         asyncio.create_task(update_user_active_character_views(bot, db_manager, user_id, char_name, exclude_message_id=interaction.message.id if interaction.message else None))
 
 
@@ -1302,7 +1382,8 @@ class ManageMaxHPView(discord.ui.LayoutView):
         allowed = await check_intended_user(self, interaction, "❌ This HP menu is not for you.")
         if allowed and interaction.message and getattr(self, "db_manager", None):
             uid = getattr(self, "user_id", None) or interaction.user.id
-            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "ManageMaxHPView"))
+            cname = getattr(self, "char_name", "") or ""
+            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "ManageMaxHPView", cname))
         return allowed
 
 
@@ -1487,7 +1568,8 @@ class CharacterCardView(discord.ui.LayoutView):
         allowed = await check_intended_user(self, interaction, "❌ This character card is not for you.", allow_gm=True, db_manager=getattr(self, "db_manager", None))
         if allowed and interaction.message and getattr(self, "db_manager", None):
             uid = getattr(self, "user_id", None) or interaction.user.id
-            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "CharacterCardView"))
+            cname = getattr(self, "char_name", "") or ""
+            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "CharacterCardView", cname))
         return allowed
 
 
@@ -1524,7 +1606,7 @@ class WoundDieModal(discord.ui.Modal):
         try:
             msg = await interaction.original_response()
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", self.char_name)
             asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, self.char_name, exclude_message_id=msg.id))
         except Exception:
             pass
@@ -1561,7 +1643,7 @@ class UnwoundDieModal(discord.ui.Modal):
         try:
             msg = await interaction.original_response()
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", self.char_name)
             asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, self.char_name, exclude_message_id=msg.id))
         except Exception:
             pass
@@ -1600,7 +1682,7 @@ class LockDieModal(discord.ui.Modal):
         try:
             msg = await interaction.original_response()
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", self.char_name)
             asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, self.char_name, exclude_message_id=msg.id))
         except Exception:
             pass
@@ -1637,7 +1719,7 @@ class UnlockDieModal(discord.ui.Modal):
         try:
             msg = await interaction.original_response()
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", self.char_name)
             asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, self.char_name, exclude_message_id=msg.id))
         except Exception:
             pass
@@ -1894,7 +1976,7 @@ class ApplySupportDieButton(discord.ui.Button):
             if interaction.guild:
                 asyncio.create_task(sync_member_swing_color_role(bot, interaction.guild, item["share_user_id"], db_manager))
 
-            m_do_char = re.search(r"^\*([^*]+)\*\s+rolled for", full_text, re.MULTILINE)
+            m_do_char = re.search(r"^\*([^*]+)\*\s+rolled (?:for|to do)", full_text, re.MULTILINE)
             display_name = m_do_char.group(1).strip() if m_do_char else char_name
             m_d20 = re.search(r"d20 Die Roll:\*\*\s*\*\*(\d+)\*\*", full_text)
             d20_roll = int(m_d20.group(1)) if m_d20 else 1
@@ -2225,7 +2307,7 @@ class RollToDyeView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.", allow_gm=True, db_manager=getattr(self, "db_manager", None))
+        return await check_roll_active_character(self, interaction)
 
 
 class RollToDoView(discord.ui.LayoutView):
@@ -2348,7 +2430,7 @@ class RollToDoView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.", allow_gm=True, db_manager=getattr(self, "db_manager", None))
+        return await check_roll_active_character(self, interaction)
 
 
 class RollToRecoverView(discord.ui.LayoutView):
@@ -2463,7 +2545,7 @@ class RollToRecoverView(discord.ui.LayoutView):
             await interaction.response.send_message(view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return await check_intended_user(self, interaction, "❌ This roll is not yours to modify.", allow_gm=True, db_manager=getattr(self, "db_manager", None))
+        return await check_roll_active_character(self, interaction)
 
 
 

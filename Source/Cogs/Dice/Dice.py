@@ -132,7 +132,9 @@ class Dice(commands.Cog):
         pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
 
         view = RollToDyeView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, pending_support, self.db_manager)
-        await interaction.followup.send(view=view)
+        msg = await interaction.followup.send(view=view)
+        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToDyeView", active_char)
 
     @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or 1d6 Wild die to affect the world")
     async def roll_to_do(self, interaction: discord.Interaction):
@@ -159,7 +161,9 @@ class Dice(commands.Cog):
 
         pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
         view = RollToDoView(self.bot, interaction.user.id, active_char, display_name, swing_info, d20_roll, d6_wild, pending_support, self.db_manager)
-        await interaction.followup.send(view=view)
+        msg = await interaction.followup.send(view=view)
+        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToDoView", active_char)
 
     @app_commands.command(name="roll_to_recover", description="Unlock all locked dice and roll unwounded dice to regain HP")
     async def roll_to_recover(self, interaction: discord.Interaction):
@@ -210,7 +214,9 @@ class Dice(commands.Cog):
             new_hp=new_hp,
             max_hp=max_hp
         )
-        await interaction.followup.send(view=view)
+        msg = await interaction.followup.send(view=view)
+        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToRecoverView", active_char)
         asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
 
     @app_commands.command(name="set_gm", description="choose who is the game gm")
@@ -231,14 +237,14 @@ class Dice(commands.Cog):
             view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
             msg = await interaction.followup.send(view=view)
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "AttributeSetView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "AttributeSetView", active_char)
         else:
             if active_char:
                 await self.db_manager.completely_delete_character(interaction.user.id, active_char)
             view = NoCharactersLeftView(self.bot, self.db_manager, user_id=interaction.user.id)
             msg = await interaction.followup.send(view=view)
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "NoCharactersLeftView")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "NoCharactersLeftView", "")
 
     async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         chars = await self.db_manager.get_all_characters(interaction.user.id)
@@ -294,7 +300,7 @@ class Dice(commands.Cog):
         view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=active_char)
         msg = await interaction.followup.send(view=view)
         ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView")
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", active_char)
 
     @app_commands.command(name="wound_die", description="Wound an attribute die")
     async def wound_die(self, interaction: discord.Interaction):
@@ -498,7 +504,7 @@ class Dice(commands.Cog):
         view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
         msg = await interaction.followup.send(view=view)
         ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "ManageMaxHPView")
+        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "ManageMaxHPView", active_char)
 
     @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
     @app_commands.guild_only()

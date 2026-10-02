@@ -9,8 +9,8 @@
     <img src="https://img.shields.io/badge/Support%20Server-Join%20Community-57F287?style=for-the-badge&logo=discord&logoColor=white" alt="Support Server" />
   </a>
   &nbsp;
-  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.4">
-    <img src="https://img.shields.io/badge/Release-v1.0.4-blue?style=for-the-badge" alt="Release v1.0.4" />
+  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.0.5">
+    <img src="https://img.shields.io/badge/Release-v1.0.5-blue?style=for-the-badge" alt="Release v1.0.5" />
   </a>
 </p>
 
@@ -30,7 +30,8 @@ A dedicated Discord companion bot for the **Sentiment Tabletop Roleplaying Game 
 
 ## ✨ Key Features
 
-- **⚡ Persistent Views, Active Character Synchronization & Security (v1.0.4)**:
+- **⚡ Persistent Views, Active Character Synchronization & Security (v1.0.5)**:
+  - **First Character Creation View:** Dedicated introductory view with step-by-step color and bonus assignment instructions when setting attributes for the first time.
   - **Full Restart Persistence:** All views and interactive components survive bot restarts seamlessly with persistent registration and dynamic context resolution.
   - **Intended User Protection:** Enforced interaction checks ensure players can only modify their own rolls, cards, and character configurations (with GM overrides where appropriate).
   - **Timeout Prevention:** Immediate response deferrals and background role syncing eliminate Discord 3-second interaction timeouts.

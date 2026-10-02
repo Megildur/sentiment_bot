@@ -25,6 +25,7 @@ from .Views import (
     get_swing_accent_color,
     ColorRolesConfigView,
     NoCharactersLeftView,
+    CreateCharacterView,
     get_persistent_views,
     update_user_active_character_views,
 )
@@ -241,10 +242,10 @@ class Dice(commands.Cog):
         else:
             if active_char:
                 await self.db_manager.completely_delete_character(interaction.user.id, active_char)
-            view = NoCharactersLeftView(self.bot, self.db_manager, user_id=interaction.user.id)
+            view = CreateCharacterView(self.bot, self.db_manager, user_id=interaction.user.id)
             msg = await interaction.followup.send(view=view)
             ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "NoCharactersLeftView", "")
+            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CreateCharacterView", "")
 
     async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         chars = await self.db_manager.get_all_characters(interaction.user.id)
@@ -521,4 +522,4 @@ class Dice(commands.Cog):
             author_id=None,
             timeout=None
         )
-        await paginator.start(interaction)
+        await paginator.start(interaction)

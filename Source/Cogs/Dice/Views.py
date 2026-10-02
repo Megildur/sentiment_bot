@@ -146,10 +146,14 @@ async def update_user_active_character_views(bot, db_manager, user_id: int, new_
                 continue
 
             new_view = None
-            if view_type in ("AttributeSetView", "NoCharactersLeftView"):
+            if view_type in ("AttributeSetView", "NoCharactersLeftView", "CreateCharacterView"):
                 if not new_char_name:
-                    new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
-                    await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView", "")
+                    if view_type == "CreateCharacterView":
+                        new_view = CreateCharacterView(bot, db_manager, user_id=user_id)
+                        await db_manager.track_active_view(user_id, channel_id, message_id, "CreateCharacterView", "")
+                    else:
+                        new_view = NoCharactersLeftView(bot, db_manager, user_id=user_id)
+                        await db_manager.track_active_view(user_id, channel_id, message_id, "NoCharactersLeftView", "")
                 else:
                     new_view = await AttributeSetView.build_for_user(bot, user_id, db_manager, new_char_name)
                     await db_manager.track_active_view(user_id, channel_id, message_id, "AttributeSetView", new_char_name)
@@ -774,6 +778,39 @@ class DeleteCharSelect(discord.ui.Select):
         swing = await db_manager.get_swing(user_id, char_to_delete)
         view = ConfirmDeleteCharView(bot, db_manager, char_to_delete, active_char, swing=swing, user_id=user_id)
         await interaction.edit_original_response(view=view)
+
+class CreateCharacterView(discord.ui.LayoutView):
+    def __init__(self, bot, db_manager, user_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.db_manager = db_manager
+        self.user_id = user_id
+        container = discord.ui.Container(
+            discord.ui.TextDisplay(content="## **Create New Character!**"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content=(
+                "You have no characters made.\n\n"
+                "To create a new character please press the button below.\n\n"
+                "When the menu comes up start by entering your character's name.\n"
+                "Then select up to three colors, and select a bonus for each.\n"
+                "Select bonuses in the same order as your colors from top to bottom in the checklist.\n\n"
+                "**NOTE:** Only select the same number of bonuses as selected colors!\n"
+            )),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.ActionRow(
+                CreateCharButton(bot, db_manager),
+                CloseMenuButton()
+            ),
+            accent_color=discord.Color.random()
+        )
+        self.add_item(container)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        allowed = await check_intended_user(self, interaction, "❌ This menu is not for you.")
+        if allowed and interaction.message and getattr(self, "db_manager", None):
+            uid = getattr(self, "user_id", None) or interaction.user.id
+            asyncio.create_task(self.db_manager.track_active_view(uid, interaction.channel_id, interaction.message.id, "CreateCharacterView", ""))
+        return allowed
 
 class NoCharactersLeftView(discord.ui.LayoutView):
     def __init__(self, bot, db_manager, deleted_char: str = None, user_id: Optional[int] = None):
@@ -2569,6 +2606,9 @@ def get_persistent_views(bot, db_manager) -> list[discord.ui.LayoutView]:
 
     v_select = SelectNewActiveCharView(bot=bot, db_manager=db_manager, all_chars=[], user_id=None)
     views.append(v_select)
+
+    v_create = CreateCharacterView(bot=bot, db_manager=db_manager, user_id=None)
+    views.append(v_create)
 
     v_none = NoCharactersLeftView(bot=bot, db_manager=db_manager, user_id=None)
     views.append(v_none)

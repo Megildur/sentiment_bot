@@ -1,525 +1,319 @@
-import asyncio
-import discord
+"""Sentiment's slash commands. Command, group and option names are fixed: renaming one breaks it for every server."""
+import logging
 import random
-from discord.ext import commands
+from typing import Optional, Union
+
+import discord
 from discord import app_commands
-from discord.app_commands import Choice
-from typing import Optional, Literal, Any
-from .Database import DiceDatabase
-from .Views import (
-    SetValuesModal,
-    CreateCharButton,
-    AttributeSetView,
-    NoticeView,
-    CharacterCardView,
-    ManageMaxHPView,
-    HPActionResultView,
-    WoundDieModal,
-    UnwoundDieModal,
-    LockDieModal,
-    UnlockDieModal,
-    SupportDieModal,
-    RollToDyeView,
-    RollToDoView,
-    RollToRecoverView,
-    get_swing_accent_color,
-    ColorRolesConfigView,
-    NoCharactersLeftView,
-    CreateCharacterView,
-    get_persistent_views,
-    update_user_active_character_views,
+from discord.ext import commands
+
+from Source.Utils import Theme
+from Source.Utils.Background import Background
+from Source.Utils.Notice import notice_view, send_ephemeral
+from Source.Utils.Permissions import server_of
+from . import Characters, ColorRolesPanel, GM, HelpPages, Rolls
+from .Characters import (
+    ATTRIBUTES, CARD, CREATE, MAX_HP, active_character, attribute_panel, character_card, create_character_view,
+    hp_result_view, max_hp_panel, refresh_later,
 )
 from .ColorRoles import remove_swing_color_roles, sync_member_swing_color_role
-from Source.Utils.Paginator import ButtonPaginator
-from .HelpPages import get_help_pages
+from .Common import send_tracked
+from .Constants import swing_accent
+from .Database import CharacterState, DiceDatabase
+from .DieStates import DieStateModal, SupportDieModal
+from .RollText import VIEW_TYPES, Die
+
+log = logging.getLogger(__name__)
+
+# Every button and menu on Sentiment's messages; see Source/Utils/Views.py.
+LASTING_ITEMS = Characters.ITEMS + Rolls.ITEMS + GM.ITEMS + HelpPages.ITEMS + ColorRolesPanel.ITEMS
+
+NO_MENTIONS = discord.AllowedMentions.none()
+
 
 class Dice(commands.Cog):
-    hp = app_commands.Group(name="hp", description="Manage your active character's HP (heal, damage, max HP)")
+    hp = app_commands.Group(name="hp", description="Manage your active character's HP: heal, damage and Max HP")
 
-    def __init__(self, bot):
-        super().__init__()
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.db_manager = DiceDatabase(self.bot)
+        self.db = DiceDatabase()
+        self.background = Background()
 
     async def cog_load(self) -> None:
-        await self.db_manager.connect()
-        for pview in get_persistent_views(self.bot, self.db_manager):
-            self.bot.add_view(pview)
+        await self.db.connect()
+        self.bot.add_dynamic_items(*LASTING_ITEMS)
 
     async def cog_unload(self) -> None:
-        await self.db_manager.close()
+        self.bot.remove_dynamic_items(*LASTING_ITEMS)
+        self.background.cancel_all()
+        await self.db.close()
 
-    async def _get_char_color(self, user_id: int, char_name: Optional[str] = None) -> discord.Color:
+    async def _state(self, interaction: discord.Interaction) -> Optional[CharacterState]:
+        """The player's active character, or None after telling them they have none.
+
+        Called before any defer, so the notice stays private.
+        """
+        char_name = await active_character(interaction, interaction.user.id)
         if not char_name:
-            return discord.Color.random()
-        swing = await self.db_manager.get_swing(user_id, char_name)
-        return get_swing_accent_color(swing)
-
-    async def _ensure_active_char(self, interaction: discord.Interaction) -> Optional[str]:
-        active_char = await self.db_manager.get_selected_char(interaction.user.id)
-        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
-        if not all_chars:
-            if active_char:
-                await self.db_manager.completely_delete_character(interaction.user.id, active_char)
-            view = NoticeView(
-                title="⚠️ No Active Character",
-                body="You do not have any characters created.\n\nUse `/set_attributes` to create a character first!"
-            )
-            if interaction.response.is_done():
-                await interaction.followup.send(view=view, ephemeral=True)
-            else:
-                await interaction.response.send_message(view=view, ephemeral=True)
+            await send_ephemeral(interaction, notice_view("No character", "You don't have a character yet. Create one with `/set_attributes`.", Theme.ACCENT))
             return None
+        return await self.db.get_character_state(interaction.user.id, char_name)
 
-        if not active_char or active_char not in all_chars:
-            active_char = all_chars[0]
-            await self.db_manager.set_selected_char(interaction.user.id, active_char)
-            asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
+    async def _refuse(self, interaction: discord.Interaction, title: str, body: str, state: Optional[CharacterState] = None) -> None:
+        await send_ephemeral(interaction, notice_view(title, body, swing_accent(state.swing) if state else Theme.ACCENT))
 
-        return active_char
+    # Rolls
 
-    @app_commands.command(name="roll_to_dye", description="Roll all available attribute dice to defend or react")
-    async def roll_to_dye(self, interaction: discord.Interaction):
+    @app_commands.command(name="roll_to_dye", description="Roll every available Attribute die to defend or react")
+    async def roll_to_dye(self, interaction: discord.Interaction) -> None:
+        state = await self._state(interaction)
+        if state is None:
+            return
+        if not state.attributes:
+            await self._refuse(interaction, "No Attributes", f"**{state.display_name}** has no Attributes. Add some with `/set_attributes`.", state)
+            return
+        usable = state.usable()
+        if not usable:
+            await self._refuse(interaction, "No dice to roll", f"All of **{state.display_name}**'s dice are Wounded, Locked or sent to an ally as Support.", state)
+            return
+
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+        swing = state.swing
+        dice = [
+            # The swing die keeps its saved value instead of being rolled again.
+            Die(c, state.name(c), swing[1], b, True) if swing and c == swing[0] else Die(c, state.name(c), random.randint(1, 6), b)
+            for c, b in usable
+        ]
+        waiting = await self.db.get_pending_support_dice(interaction.user.id, state.char_name)
+        view = Rolls.dye_view(state.display_name, dice, [], bool(waiting))
+        await send_tracked(interaction, view, VIEW_TYPES["dye"], interaction.user.id, state.char_name)
+
+    @app_commands.command(name="roll_to_do", description="Roll a d20 plus your Swing, or a Wild 1d6, to act on the world")
+    async def roll_to_do(self, interaction: discord.Interaction) -> None:
+        state = await self._state(interaction)
+        if state is None:
             return
-
-        char_color = await self._get_char_color(interaction.user.id, active_char)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-        if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** does not have any attributes set. Use `/set_attributes` to configure them.", color=char_color)
-            await interaction.followup.send(view=view)
-            return
-
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
-        shared_out = await self.db_manager.get_active_shared_out_dice(interaction.user.id, active_char)
-        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked and a[0] not in shared_out]
-        display_name = await self.db_manager.get_char_display_name(active_char)
-
-        if not available:
-            view = NoticeView("⚠️ No Dice Available", f"No attribute dice are available for **{display_name}** to Roll to Dye.\n\nAll dice are wounded, locked, or currently lent out to allies.", color=char_color)
-            await interaction.followup.send(view=view)
-            return
-
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-        swing_color = swing[0] if swing else None
-        swing_val = swing[1] if swing else None
-
-        rolled_dice = []
-        for color, bonus in available:
-            custom_name = attr_names.get(color, "None")
-            if swing and color == swing_color:
-                rolled_dice.append({
-                    "color": color,
-                    "name": custom_name,
-                    "roll": swing_val,
-                    "bonus": bonus,
-                    "is_swing": True
-                })
-            else:
-                rolled_dice.append({
-                    "color": color,
-                    "name": custom_name,
-                    "roll": random.randint(1, 6),
-                    "bonus": bonus,
-                    "is_swing": False
-                })
-
-        swing_bonus = next((b for c, b in available if c == swing_color), 0) if swing_color else 0
-        swing_info = (swing_color, swing_val, swing_bonus) if swing_color and any(c == swing_color for c, _ in available) else None
-        pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
-
-        view = RollToDyeView(self.bot, interaction.user.id, active_char, display_name, rolled_dice, swing_info, pending_support, self.db_manager)
-        msg = await interaction.followup.send(view=view)
-        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToDyeView", active_char)
-
-    @app_commands.command(name="roll_to_do", description="Roll a d20 with your Swing or 1d6 Wild die to affect the world")
-    async def roll_to_do(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
-            return
-
-        display_name = await self.db_manager.get_char_display_name(active_char)
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-
-        d20_roll = random.randint(1, 20)
-        if swing:
-            color, val = swing
-            bonus = next((b for c, b in all_attrs if c == color), 0)
-            custom_name = attr_names.get(color, "None")
-            swing_info = (color, custom_name, val, bonus)
-            d6_wild = 0
+        d20 = random.randint(1, 20)
+        if state.swing:
+            color, value = state.swing
+            swing, wild = (color, state.name(color), value, state.bonus(color)), 0
         else:
-            swing_info = None
-            d6_wild = random.randint(1, 6)
+            swing, wild = None, random.randint(1, 6)
+        waiting = await self.db.get_pending_support_dice(interaction.user.id, state.char_name)
+        view = Rolls.do_view(state.display_name, d20, wild, swing, [], bool(waiting))
+        await send_tracked(interaction, view, VIEW_TYPES["do"], interaction.user.id, state.char_name)
 
-        pending_support = await self.db_manager.get_pending_support_dice(interaction.user.id, active_char)
-        view = RollToDoView(self.bot, interaction.user.id, active_char, display_name, swing_info, d20_roll, d6_wild, pending_support, self.db_manager)
-        msg = await interaction.followup.send(view=view)
-        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToDoView", active_char)
-
-    @app_commands.command(name="roll_to_recover", description="Unlock all locked dice and roll unwounded dice to regain HP")
-    async def roll_to_recover(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+    @app_commands.command(name="roll_to_recover", description="Unlock all dice and roll your Unwounded dice to regain HP")
+    async def roll_to_recover(self, interaction: discord.Interaction) -> None:
+        user_id = interaction.user.id
+        char_name = await active_character(interaction, user_id)
+        if not char_name:
+            await self._state(interaction)
             return
-
-        await self.db_manager.unlock_all_dice(interaction.user.id, active_char)
-        display_name = await self.db_manager.get_char_display_name(active_char)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        unwounded = [a for a in all_attrs if a[0] not in wounded]
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-
-        rolled_dice = []
-        total_roll = 0
-        for color, bonus in unwounded:
-            custom_name = attr_names.get(color, "None")
-            die_roll = random.randint(1, 6)
-            total_roll += die_roll + bonus
-            rolled_dice.append({
-                "color": color,
-                "name": custom_name,
-                "roll": die_roll,
-                "bonus": bonus
-            })
-
-        old_hp, new_hp, max_hp = await self.db_manager.recover_hp(
-            interaction.user.id,
-            active_char,
-            total_roll,
-            has_unwounded_dice=bool(rolled_dice)
-        )
-
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-        swing_info = (swing[0], swing[1], next((b for c, b in all_attrs if c == swing[0]), 0)) if swing else None
-
-        view = RollToRecoverView(
-            self.bot,
-            interaction.user.id,
-            active_char,
-            display_name,
-            rolled_dice,
-            swing_info,
-            self.db_manager,
-            old_hp=old_hp,
-            new_hp=new_hp,
-            max_hp=max_hp
-        )
-        msg = await interaction.followup.send(view=view)
-        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "RollToRecoverView", active_char)
-        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
-
-    @app_commands.command(name="set_gm", description="choose who is the game gm")
-    @app_commands.describe(user="user to set as gm")
-    async def set_gm_c(self, interaction: discord.Interaction, user: discord.User | discord.Member):
-        await self.db_manager.set_gm_check(interaction, user.id)
-
-    @app_commands.command(name="set_attributes", description="View or set your character attributes")
-    async def set_attributes_command(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        active_char = await self.db_manager.get_selected_char(interaction.user.id)
-        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
-        
-        if all_chars:
-            if not active_char or active_char not in all_chars:
-                active_char = all_chars[0]
-                await self.db_manager.set_selected_char(interaction.user.id, active_char)
-            view = await AttributeSetView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-            msg = await interaction.followup.send(view=view)
-            ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "AttributeSetView", active_char)
-        else:
-            if active_char:
-                await self.db_manager.completely_delete_character(interaction.user.id, active_char)
-            view = CreateCharacterView(self.bot, self.db_manager, user_id=interaction.user.id)
-            msg = await interaction.followup.send(view=view)
-            ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-            await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CreateCharacterView", "")
+        await self.db.unlock_all_dice(user_id, char_name)
+        state = await self.db.get_character_state(user_id, char_name)
+        swing_color = state.swing[0] if state.swing else None
+        dice = [Die(c, state.name(c), random.randint(1, 6), b, c == swing_color) for c, b in state.usable(locked=False, shared_out=False)]
+        total = sum(d.roll + d.bonus for d in dice)
+        hp = await self.db.recover_hp(user_id, char_name, total, has_unwounded_dice=bool(dice))
+        view = Rolls.recover_view(state.display_name, dice, hp)
+        await send_tracked(interaction, view, VIEW_TYPES["recover"], user_id, char_name)
+        refresh_later(interaction, user_id, char_name)
 
-    async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        chars = await self.db_manager.get_all_characters(interaction.user.id)
-        
-        return [
-            app_commands.Choice(name=char, value=char)
-            for char in chars if current.lower() in char.lower()
-        ][:25]
-    
+    @app_commands.command(name="roll_wild", description="Roll a single 1d6")
+    async def roll_wild(self, interaction: discord.Interaction) -> None:
+        roll = random.randint(1, 6)
+        char_name = await self.db.get_selected_char(interaction.user.id)
+        display_name = await self.db.get_char_display_name(char_name) if char_name else "no character"
+        swing = await self.db.get_swing(interaction.user.id, char_name) if char_name else None
+        view = discord.ui.LayoutView()
+        view.add_item(discord.ui.Container(
+            discord.ui.TextDisplay(f"## 🎲 1d6 rolled\n*{interaction.user.display_name}* rolled **{roll}** for *{display_name}*."),
+            accent_colour=swing_accent(swing),
+        ))
+        await interaction.response.send_message(view=view)
+
+    # Characters
+
+    @app_commands.command(name="set_attributes", description="Create a character, or set up your active character's Attributes")
+    async def set_attributes_command(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        user_id = interaction.user.id
+        char_name = await active_character(interaction, user_id)
+        if char_name:
+            view = await attribute_panel(self.bot, self.db, user_id, char_name)
+            await send_tracked(interaction, view, ATTRIBUTES, user_id, char_name)
+        else:
+            await send_tracked(interaction, create_character_view(), CREATE, user_id, "")
+
+    async def characters_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
+        chars = await self.db.get_all_characters(interaction.user.id)
+        return [app_commands.Choice(name=c, value=c) for c in chars if current.lower() in c.lower()][:25]
+
     @app_commands.command(name="change_active_character", description="Switch your active character")
     @app_commands.autocomplete(characters=characters_autocomplete)
-    async def change_active_character(self, interaction: discord.Interaction, characters: str):
+    async def change_active_character(self, interaction: discord.Interaction, characters: str) -> None:
+        user_id = interaction.user.id
+        if characters not in await self.db.get_all_characters(user_id):
+            await self._refuse(interaction, "Character not found", f"You don't have a character named **{characters}**.")
+            return
         await interaction.response.defer(ephemeral=True)
-        all_chars = await self.db_manager.get_all_characters(interaction.user.id)
-        
-        if characters not in all_chars:
-            view = NoticeView("❌ Character Not Found", f"You do not own a character named **{characters}**.")
-            await interaction.followup.send(view=view, ephemeral=True)
+        await self.db.set_selected_char(user_id, characters)
+        guild = server_of(interaction)
+        if guild is not None:
+            await sync_member_swing_color_role(guild, user_id, self.db)
+        swing = await self.db.get_swing(user_id, characters)
+        await send_ephemeral(interaction, notice_view("Active character changed", f"You're now playing **{characters}**.", swing_accent(swing) or Theme.BRAND))
+        refresh_later(interaction, user_id, characters)
+
+    @app_commands.command(name="character_card", description="Show your active character's card")
+    async def character_card(self, interaction: discord.Interaction) -> None:
+        user_id = interaction.user.id
+        char_name = await active_character(interaction, user_id)
+        if not char_name:
+            await self._state(interaction)
             return
-            
-        await self.db_manager.set_selected_char(interaction.user.id, characters)
-        guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
-        if guild:
-            await sync_member_swing_color_role(self.bot, guild, interaction.user.id, self.db_manager)
-        char_color = await self._get_char_color(interaction.user.id, characters)
-        view = NoticeView("✅ Active Character Changed", f"Your active character has been changed to **{characters}**.", color=char_color)
-        await interaction.followup.send(view=view, ephemeral=True)
-        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, characters))
-
-    @app_commands.command(name="roll_wild", description="Roll a standalone 1d6")
-    async def roll_wild(self, interaction: discord.Interaction):
-        roll = random.randint(1, 6)
-        view = discord.ui.LayoutView()
-        active_char = await self.db_manager.get_selected_char(interaction.user.id)
-        display_name = await self.db_manager.get_char_display_name(active_char) if active_char else "No Character"
-
-        container = discord.ui.Container(
-            discord.ui.TextDisplay(content="## 🎲 1d6 Rolled!"),
-            discord.ui.Separator(),
-            discord.ui.TextDisplay(content=f"*{interaction.user.display_name}* rolled **{roll}** for *{display_name}*"),
-            accent_color=discord.Color.random()
-        )
-        view.add_item(container)
-        await interaction.response.send_message(view=view)
-    
-    @app_commands.command(name="character_card", description="Display your character card and active status")
-    async def character_card(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+        view = await character_card(self.db, user_id, char_name)
+        await send_tracked(interaction, view, CARD, user_id, char_name, allowed_mentions=NO_MENTIONS)
+
+    # Dice states
+
+    async def _die_form(self, interaction: discord.Interaction, action: str) -> None:
+        state = await self._state(interaction)
+        if state is None:
             return
-
-        view = await CharacterCardView.build(self.bot, interaction, self.db_manager, char_name=active_char)
-        msg = await interaction.followup.send(view=view)
-        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "CharacterCardView", active_char)
-
-    @app_commands.command(name="wound_die", description="Wound an attribute die")
-    async def wound_die(self, interaction: discord.Interaction):
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+        if action in ("wound", "lock") and not state.attributes:
+            await self._refuse(interaction, "No Attributes", f"**{state.display_name}** has no Attributes. Add some with `/set_attributes`.", state)
             return
-
-        char_color = await self._get_char_color(interaction.user.id, active_char)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-        if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
+        colors = {
+            "wound": [c for c, _ in state.usable(locked=False, shared_out=False)],
+            "unwound": state.wounded,
+            "lock": [c for c, _ in state.usable(shared_out=False)],
+            "unlock": state.locked,
+        }[action]
+        if not colors:
+            body = {
+                "wound": f"Every Attribute of **{state.display_name}** is already Wounded.",
+                "unwound": f"None of **{state.display_name}**'s dice are Wounded.",
+                "lock": f"Every die of **{state.display_name}** is already Locked or Wounded.",
+                "unlock": f"None of **{state.display_name}**'s dice are Locked. Use `/lock_die` to Lock one.",
+            }[action]
+            await self._refuse(interaction, "Nothing to change", body, state)
             return
+        await interaction.response.send_modal(DieStateModal(action, state, colors))
 
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        available = [a for a in all_attrs if a[0] not in wounded]
-        display_name = await self.db_manager.get_char_display_name(active_char)
+    @app_commands.command(name="wound_die", description="Wound one of your Attributes")
+    async def wound_die(self, interaction: discord.Interaction) -> None:
+        await self._die_form(interaction, "wound")
 
-        if not available:
-            view = NoticeView("⚠️ All Dice Wounded", f"All attribute dice for **{display_name}** are already wounded. No more dice can be wounded.", color=char_color)
-            await interaction.response.send_message(view=view)
+    @app_commands.command(name="unwound_die", description="Heal a Wounded Attribute die")
+    async def unwound_die(self, interaction: discord.Interaction) -> None:
+        await self._die_form(interaction, "unwound")
+
+    @app_commands.command(name="lock_die", description="Lock an Attribute die, to Sprint, Tag a Prop or Ignite your Swing")
+    async def lock_die(self, interaction: discord.Interaction) -> None:
+        await self._die_form(interaction, "lock")
+
+    @app_commands.command(name="unlock_die", description="Unlock a Locked Attribute die")
+    async def unlock_die(self, interaction: discord.Interaction) -> None:
+        await self._die_form(interaction, "unlock")
+
+    @app_commands.command(name="drop_swing", description="Drop your active character's Swing and become colorless")
+    async def drop_swing(self, interaction: discord.Interaction) -> None:
+        state = await self._state(interaction)
+        if state is None:
             return
-
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        modal = WoundDieModal(self.bot, self.db_manager, active_char, available, attr_names)
-        await interaction.response.send_modal(modal)
-
-    @app_commands.command(name="unwound_die", description="Heal / unwound a wounded attribute die")
-    async def unwound_die(self, interaction: discord.Interaction):
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+        if not state.swing:
+            await self._refuse(interaction, "No Swing", f"**{state.display_name}** has no Swing to drop.")
             return
-
-        char_color = await self._get_char_color(interaction.user.id, active_char)
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        display_name = await self.db_manager.get_char_display_name(active_char)
-
-        if not wounded:
-            view = NoticeView("ℹ️ No Wounded Dice", f"None of the dice for **{display_name}** are currently wounded.\n\nUse `/wound_die` if you need to wound one.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
-            return
-
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        modal = UnwoundDieModal(self.bot, self.db_manager, active_char, wounded, attr_names)
-        await interaction.response.send_modal(modal)
-
-    @app_commands.command(name="lock_die", description="Lock an attribute die (e.g. for sprinting or igniting)")
-    async def lock_die(self, interaction: discord.Interaction):
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
-            return
-
-        char_color = await self._get_char_color(interaction.user.id, active_char)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-        if not all_attrs:
-            view = NoticeView("⚠️ No Attributes", f"**{active_char}** has no attributes set. Use `/set_attributes` to create them.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
-            return
-
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
-        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked]
-        display_name = await self.db_manager.get_char_display_name(active_char)
-
-        if not available:
-            view = NoticeView("⚠️ No Lockable Dice", f"No dice are available to lock for **{display_name}**.\n\nAll dice are either already locked or wounded.", color=char_color)
-            await interaction.response.send_message(view=view)
-            return
-
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        modal = LockDieModal(self.bot, self.db_manager, active_char, available, attr_names)
-        await interaction.response.send_modal(modal)
-
-    @app_commands.command(name="unlock_die", description="Unlock a locked attribute die")
-    async def unlock_die(self, interaction: discord.Interaction):
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
-            return
-
-        char_color = await self._get_char_color(interaction.user.id, active_char)
-        locked = await self.db_manager.get_locked(interaction.user.id, active_char)
-        display_name = await self.db_manager.get_char_display_name(active_char)
-
-        if not locked:
-            view = NoticeView("ℹ️ No Locked Dice", f"There are no locked dice for **{display_name}**.\n\nUse `/lock_die` to lock one if needed.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
-            return
-
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, active_char)
-        modal = UnlockDieModal(self.bot, self.db_manager, active_char, locked, attr_names)
-        await interaction.response.send_modal(modal)
-
-    @app_commands.command(name="drop_swing", description="Drop your character's current active swing die")
-    async def drop_swing(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
-            return
-
-        display_name = await self.db_manager.get_char_display_name(active_char)
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-
-        if not swing:
-            view = NoticeView("ℹ️ No Swing Set", f"**{display_name}** does not currently have an active swing set.", color=discord.Color.random())
-            await interaction.followup.send(view=view, ephemeral=True)
-            return
-
-        await self.db_manager.drop_swing(interaction.user.id, active_char)
-        guild = interaction.guild or (self.bot.get_guild(interaction.guild_id) if (self.bot and interaction.guild_id) else None)
-        if guild:
-            await remove_swing_color_roles(self.bot, guild, interaction.user.id, self.db_manager)
-        view = NoticeView("✅ Swing Dropped", f"Dropped active swing for **{display_name}**.\n\nYour character is now colorless with no active swing.", color=discord.Color.random())
+        user_id = interaction.user.id
+        await self.db.drop_swing(user_id, state.char_name)
+        guild = server_of(interaction)
+        if guild is not None:
+            await remove_swing_color_roles(guild, user_id, self.db)
+        view = notice_view("Swing dropped", f"**{state.display_name}** dropped their Swing and is colorless now.", None)
         await interaction.followup.send(view=view)
-        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
+        refresh_later(interaction, user_id, state.char_name)
 
-    @app_commands.command(name="support", description="Share an attribute die to support an ally's roll")
-    @app_commands.describe(user="The ally you want to support with a die")
-    async def support(self, interaction: discord.Interaction, user: discord.User | discord.Member):
-        sender_char = await self._ensure_active_char(interaction)
-        if not sender_char:
+    @app_commands.command(name="support", description="Send an Attribute die to Support an ally's next roll")
+    @app_commands.describe(user="The ally to Support")
+    async def support(self, interaction: discord.Interaction, user: Union[discord.User, discord.Member]) -> None:
+        state = await self._state(interaction)
+        if state is None:
             return
-
-        char_color = await self._get_char_color(interaction.user.id, sender_char)
-
         if user.id == interaction.user.id:
-            view = NoticeView("❌ Invalid Ally", "You cannot send a support die to yourself!", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await self._refuse(interaction, "Pick an ally", "You can't Support yourself.", state)
             return
-
-        target_char = await self.db_manager.get_selected_char(user.id)
+        target_char = await self.db.get_selected_char(user.id)
         if not target_char:
-            view = NoticeView("⚠️ Ally Has No Character", f"<@{user.id}> does not have an active character selected.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
+            await self._refuse(interaction, "Ally has no character", f"<@{user.id}> has no active character.", state)
             return
-
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, sender_char)
-        wounded = await self.db_manager.get_wounded(interaction.user.id, sender_char)
-        locked = await self.db_manager.get_locked(interaction.user.id, sender_char)
-        shared_out = await self.db_manager.get_active_shared_out_dice(interaction.user.id, sender_char)
-        available = [a for a in all_attrs if a[0] not in wounded and a[0] not in locked and a[0] not in shared_out]
-        sender_display = await self.db_manager.get_char_display_name(sender_char)
-
-        if not available:
-            view = NoticeView("⚠️ No Available Dice", f"You have no available dice to send as support for **{sender_display}**.\n\nAll dice are wounded, locked, or already supporting an ally.", color=char_color)
-            await interaction.response.send_message(view=view, ephemeral=True)
+        colors = [c for c, _ in state.usable()]
+        if not colors:
+            await self._refuse(interaction, "No dice to send", f"All of **{state.display_name}**'s dice are Wounded, Locked or already Supporting an ally.", state)
             return
+        await interaction.response.send_modal(SupportDieModal(state, user, target_char, colors))
 
-        attr_names = await self.db_manager.get_attribute_names(interaction.user.id, sender_char)
-        modal = SupportDieModal(self.bot, self.db_manager, sender_char, user, target_char, available, attr_names)
-        await interaction.response.send_modal(modal)
+    # HP
 
-    @hp.command(name="heal", description="Restore current HP for your active character (cannot exceed Max HP)")
-    @app_commands.describe(amount="Amount of HP to restore")
-    async def hp_heal(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
+    @hp.command(name="heal", description="Restore HP to your active character, up to Max HP")
+    @app_commands.describe(amount="How much HP to restore")
+    async def hp_heal(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]) -> None:
+        state = await self._state(interaction)
+        if state is None:
+            return
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+        old_hp, new_hp, max_hp = await self.db.heal_hp(interaction.user.id, state.char_name, amount)
+        await interaction.followup.send(view=hp_result_view(state.display_name, "heal", amount, old_hp, new_hp, max_hp, swing=state.swing))
+        refresh_later(interaction, interaction.user.id, state.char_name)
+
+    @hp.command(name="damage", description="Take damage on your active character's HP")
+    @app_commands.describe(amount="How much damage was taken")
+    async def hp_damage(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]) -> None:
+        state = await self._state(interaction)
+        if state is None:
             return
-
-        display_name = await self.db_manager.get_char_display_name(active_char)
-        old_hp, new_hp, max_hp = await self.db_manager.heal_hp(interaction.user.id, active_char, amount)
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-        view = HPActionResultView(display_name, "heal", amount, old_hp, new_hp, max_hp, swing=swing)
-        await interaction.followup.send(view=view)
-        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
-
-    @hp.command(name="damage", description="Deal damage to your active character's current HP")
-    @app_commands.describe(amount="Amount of damage taken")
-    async def hp_damage(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1]):
         await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
-            return
-
-        display_name = await self.db_manager.get_char_display_name(active_char)
-        old_hp, new_hp, max_hp = await self.db_manager.damage_hp(interaction.user.id, active_char, amount)
-        all_attrs = await self.db_manager.get_character_attributes(interaction.user.id, active_char)
-        wounded = await self.db_manager.get_wounded(interaction.user.id, active_char)
-        swing = await self.db_manager.get_swing(interaction.user.id, active_char)
-        view = HPActionResultView(
-            display_name,
-            "damage",
-            amount,
-            old_hp,
-            new_hp,
-            max_hp,
-            total_attrs=len(all_attrs),
-            wounded_count=len(wounded),
-            swing=swing
+        old_hp, new_hp, max_hp = await self.db.damage_hp(interaction.user.id, state.char_name, amount)
+        view = hp_result_view(
+            state.display_name, "damage", amount, old_hp, new_hp, max_hp,
+            total_attrs=len(state.attributes), wounded_count=len(state.wounded), swing=state.swing,
         )
         await interaction.followup.send(view=view)
-        asyncio.create_task(update_user_active_character_views(self.bot, self.db_manager, interaction.user.id, active_char))
+        refresh_later(interaction, interaction.user.id, state.char_name)
 
-    @hp.command(name="max", description="Open the Manage Max HP submenu (Level Up Potential brackets or custom adjust)")
-    async def hp_max(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        active_char = await self._ensure_active_char(interaction)
-        if not active_char:
+    @hp.command(name="max", description="Raise or lower Max HP: spend Potential, or set it yourself")
+    async def hp_max(self, interaction: discord.Interaction) -> None:
+        user_id = interaction.user.id
+        char_name = await active_character(interaction, user_id)
+        if not char_name:
+            await self._state(interaction)
             return
+        await interaction.response.defer()
+        view = await max_hp_panel(self.db, user_id, char_name)
+        await send_tracked(interaction, view, MAX_HP, user_id, char_name)
 
-        view = await ManageMaxHPView.build(self.bot, interaction, self.db_manager, active_char)
-        msg = await interaction.followup.send(view=view)
-        ch_id = msg.channel.id if getattr(msg, "channel", None) else interaction.channel_id
-        await self.db_manager.track_active_view(interaction.user.id, ch_id, msg.id, "ManageMaxHPView", active_char)
+    # Server and help
 
-    @app_commands.command(name="color_roles", description="Manage and configure swing color roles that change user name color in chat")
+    @app_commands.command(name="set_gm", description="Choose who is the game's GM")
+    @app_commands.describe(user="The member to make GM")
+    async def set_gm_c(self, interaction: discord.Interaction, user: Union[discord.User, discord.Member]) -> None:
+        await GM.set_gm(interaction, user)
+
+    @app_commands.command(name="color_roles", description="Set up the roles that color players' names by their Swing")
     @app_commands.guild_only()
-    async def color_roles(self, interaction: discord.Interaction):
+    async def color_roles(self, interaction: discord.Interaction) -> None:
+        guild = server_of(interaction)
+        if guild is None:
+            await self._refuse(interaction, "Server only", "Color roles work in a server Sentiment is in.")
+            return
         await interaction.response.defer()
-        view = await ColorRolesConfigView.build(self.bot, interaction.guild, self.db_manager)
-        await interaction.followup.send(view=view)
+        await interaction.followup.send(view=await ColorRolesPanel.color_roles_panel(guild, self.db), allowed_mentions=NO_MENTIONS)
 
-    @app_commands.command(name="help", description="Guide and reference for Sentiment TTRPG commands and mechanics")
-    async def help_command(self, interaction: discord.Interaction):
-        pages = get_help_pages()
-        paginator = ButtonPaginator.create_standard_paginator(
-            pages,
-            author_id=None,
-            timeout=None
-        )
-        await paginator.start(interaction)
+    @app_commands.command(name="help", description="Guide to Sentiment's commands and rules")
+    async def help_command(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(view=HelpPages.help_view())

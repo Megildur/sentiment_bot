@@ -11,5 +11,9 @@ Data/
 
 # Editor Configs
 pyrightconfig.json
+.vscode/
+
+# Local tests and tools, kept out of the repo and off the server.
+scratch/
 
 

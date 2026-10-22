@@ -172,14 +172,6 @@ Server role order
    ```
 6. Sync the slash commands from a server in `ALLOWED_GUILDS` with `!b quicksync`, or `/owner sync sync_type:Guild`.
 
-### Tests
-They run offline against a temporary database:
-```bash
-python scratch/test_press_everything.py
-python scratch/test_rolls.py
-python scratch/test_fixed_names.py
-python scratch/check_code_rules.py
-```
 
 ---
 
@@ -191,7 +183,6 @@ sentiment/
 ├── start.ps1                   # Pulls the latest version, sets up the venv and starts the bot
 ├── requirements.txt            # discord.py, aiosqlite, python-dotenv
 ├── Data/Dice.db                # SQLite database (not in git)
-├── scratch/                    # Offline tests
 └── Source/
     ├── Errors.py               # Last-resort error notices
     ├── OwnerCommands.py        # /owner sync, ext and cogs

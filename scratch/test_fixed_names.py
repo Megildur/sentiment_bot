@@ -19,6 +19,7 @@ TABLES = {
     "support_die": ["share_support_user_id", "recieve_support_user_id", "share_support_char_name", "recieve_support_char_name", "attribute", "attribute_name"],
     "selected_char": ["user_id", "char_name"],
     "gm": ["value", "user_id"],
+    "guild_gm": ["guild_id", "user_id"],
     "npc": ["value", "char_name"],
     "swing": ["user_id", "char_name", "swing", "swing_value"],
     "wounded": ["user_id", "char_name", "wounded"],

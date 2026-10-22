@@ -42,6 +42,23 @@ class Dice(commands.Cog):
     async def cog_load(self) -> None:
         await self.db.connect()
         self.bot.add_dynamic_items(*LASTING_ITEMS)
+        self.background.spawn(self._move_gm_to_servers())
+
+    async def _move_gm_to_servers(self) -> None:
+        """Make the old one-for-every-server GM the GM of each server they share with Sentiment.
+
+        Runs once, after the update that made GMs per server: as soon as any server has
+        its own GM, the old row is ignored. Waits for the server list, so it never holds
+        up loading.
+        """
+        await self.bot.wait_until_ready()
+        legacy = await self.db.get_legacy_gm()
+        if legacy is None or await self.db.has_server_gms():
+            return
+        for guild in self.bot.guilds:
+            if guild.get_member(legacy) is not None:
+                await self.db.set_gm(guild.id, legacy)
+                log.info("Made %s the GM of server %s, as before GMs were per server", legacy, guild.id)
 
     async def cog_unload(self) -> None:
         self.bot.remove_dynamic_items(*LASTING_ITEMS)
@@ -143,7 +160,7 @@ class Dice(commands.Cog):
         user_id = interaction.user.id
         char_name = await active_character(interaction, user_id)
         if char_name:
-            view = await attribute_panel(self.bot, self.db, user_id, char_name)
+            view = await attribute_panel(self.bot, self.db, interaction.guild_id, user_id, char_name)
             await send_tracked(interaction, view, ATTRIBUTES, user_id, char_name)
         else:
             await send_tracked(interaction, create_character_view(), CREATE, user_id, "")
@@ -299,8 +316,9 @@ class Dice(commands.Cog):
 
     # Server and help
 
-    @app_commands.command(name="set_gm", description="Choose who is the game's GM")
+    @app_commands.command(name="set_gm", description="Choose this server's GM")
     @app_commands.describe(user="The member to make GM")
+    @app_commands.guild_only()
     async def set_gm_c(self, interaction: discord.Interaction, user: Union[discord.User, discord.Member]) -> None:
         await GM.set_gm(interaction, user)
 

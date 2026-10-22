@@ -85,14 +85,14 @@ async def send_tracked(
 
 
 class DiceItem(LastingItem):
-    """A control on a player's message. `gm_allowed` lets the GM use it on any player's message."""
+    """A control on a player's message. `gm_allowed` lets the server's GM use it on any player's message."""
 
     gm_allowed: ClassVar[bool] = False
 
     async def allowed(self, interaction: discord.Interaction) -> bool:
         if not self.owner_only or interaction.user.id == await owner_of(interaction):
             return True
-        return self.gm_allowed and await dice_db(interaction).is_gm(interaction.user.id)
+        return self.gm_allowed and await dice_db(interaction).is_gm(interaction.guild_id, interaction.user.id)
 
 
 class DiceModal(discord.ui.Modal):

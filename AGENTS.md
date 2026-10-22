@@ -21,6 +21,9 @@ Adapted from Botzilla's AGENTS.md. Where the two differ, this file wins for this
   Descriptions, labels and wording may change.
 - Store data only in SQLite through `DiceDatabase` (`cog.db`). Never JSON or other files, and never
   `db.db.execute` outside `Database.py`.
+- Each server has its own GM (`guild_gm`); there is no GM in DMs. Every GM check passes the server:
+  `db.is_gm(interaction.guild_id, user_id)`. The old `gm` table (one GM for every server) is only
+  read once, by `Dice._move_gm_to_servers`, and never written.
 - The database is the source of truth. Don't keep game state in memory: not per player, not per
   message. A press reads what it needs from the message and the database (see Lasting messages).
 - `cog_load` may open the SQLite file and create tables (local, milliseconds). No Discord or other
@@ -163,7 +166,7 @@ These are known and left for the owner to decide. Don't "fix" them silently; don
 - Raising Max HP also raises current HP by the same amount.
 - Roll to Recover also rolls dice lent out as Support.
 - Players set Attribute Levels freely (0 to 9); the bot doesn't charge Potential or count Levels.
-- One GM for every server (the `gm` table has one row), and NPC marks are by character name.
+- NPC marks are by character name, so they cover every player's character with that name.
 - Not tracked: Speed, Potential, Gifts, Scenes, Conflicts and Acts, Restrict, interrupted Rests,
   reclaiming Support dice. Ignite is a Lock of the Swing die with `/lock_die`.
 
@@ -195,7 +198,7 @@ Every button and menu Sentiment posts keeps working forever and after restarts. 
   from its text (`RollText.parse_roll`), the color being edited from the panel's own menu. Roll line
   formats are data: change one only together with its pattern, keep old formats readable, and run
   `scratch/test_rolls.py`.
-- Who may press: the owner by default; `gm_allowed = True` on items the GM may use on any player's
+- Who may press: the owner by default; `gm_allowed = True` on items the server's GM may use on any player's
   message (setup panels, cards, rolls); `owner_only = False` for anyone (help pages, Sync my role).
 - Messages about a character are tracked in `active_character_views` (`Common.send_tracked`,
   `Characters.show`) so `refresh_later` can redraw them, and grey out rolls for a character that's

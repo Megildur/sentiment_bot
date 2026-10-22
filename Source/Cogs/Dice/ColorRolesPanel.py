@@ -1,7 +1,7 @@
 """/color_roles: the public panel for a server's swing color roles.
 
 Anyone can sync their own role from it. Setting roles up, picking or resetting
-a color's role, and syncing everyone take Manage Roles, or being the GM.
+a color's role, and syncing everyone take Manage Roles, or being the server's GM.
 The color being edited is read from the message's color menu, so two servers'
 panels never mix.
 """
@@ -100,7 +100,7 @@ class ColorRolesItem(LastingItem):
     async def allowed(self, interaction: discord.Interaction) -> bool:
         if not self.staff_only:
             return True
-        return member_has(interaction.user, "manage_roles") or await dice_db(interaction).is_gm(interaction.user.id)
+        return member_has(interaction.user, "manage_roles") or await dice_db(interaction).is_gm(interaction.guild_id, interaction.user.id)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if server_of(interaction) is None:

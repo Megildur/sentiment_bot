@@ -1,112 +1,63 @@
-import os
-import discord
+"""The last resort when a slash command or view fails: a plain-language private notice, details in the log."""
 import logging
-from discord.ext import commands
+import os
+
+import discord
 from discord import app_commands
-from dotenv import load_dotenv
+from discord.ext import commands
+
+from Source.Utils import Theme
+from Source.Utils.Notice import notice_view, send_ephemeral
 
 log = logging.getLogger(__name__)
 
-load_dotenv()
-
-bot_server = os.getenv("BOT_SERVER", "")
+SUPPORT_SERVER = os.getenv("BOT_SERVER", "")
 
 
-async def global_view_error(
-    view_instance: discord.ui.LayoutView,
-    interaction: discord.Interaction,
-    error: Exception,
-    item: discord.ui.Item,
-) -> None:
-    log.error("Unhandled exception in view %s", type(view_instance).__name__, exc_info=error)
-    message = "An error occurred while processing this interaction. Please try again later."
+def _error_view(title: str, body: str) -> discord.ui.LayoutView:
+    footer = f"If this keeps happening, ask in the [support server]({SUPPORT_SERVER})." if SUPPORT_SERVER else None
+    return notice_view(title, body, Theme.ERROR, footer)
 
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
-    except discord.HTTPException as send_error:
-        log.warning("View error handler failed to send a response: %s", send_error)
 
-class ErrorDisplayView(discord.ui.LayoutView):
-    def __init__(self, title: str, description: str):
-        super().__init__(timeout=None)
+async def global_view_error(view: discord.ui.LayoutView, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+    log.error("Unhandled exception in view %s", type(view).__name__, exc_info=error)
+    await send_ephemeral(interaction, _error_view("Something went wrong", "That didn't go through. Try again in a moment."))
 
-      
-        container = discord.ui.Container(
-            discord.ui.TextDisplay(content=f"# **{title}**"),
-            discord.ui.Separator(),
-            discord.ui.TextDisplay(content=description),
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-            discord.ui.TextDisplay(
-                content=f"If this keeps happening, please contact the developer, Brandon, for help.\n\n> Please join the support server if you haven't!\n 🔗 **[Support Server Invite]({bot_server})**"
-            ),
-            accent_colour=discord.Colour.red()
-        )
-        self.add_item(container)
 
 class ErrorHandler(commands.Cog):
-    def __init__(self, bot):
-       self.bot = bot
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
 
     async def cog_load(self) -> None:
-        tree = self.bot.tree
-        self._old_tree_error = tree.on_error
-        tree.on_error = self.tree_on_error
+        self._old_tree_error = self.bot.tree.on_error
+        self.bot.tree.on_error = self.tree_on_error
         self._old_view_error = discord.ui.LayoutView.on_error
         discord.ui.LayoutView.on_error = global_view_error
 
-
     async def cog_unload(self) -> None:
-        tree = self.bot.tree
-        tree.on_error = self._old_tree_error
+        self.bot.tree.on_error = self._old_tree_error
         discord.ui.LayoutView.on_error = self._old_view_error
 
-    async def tree_on_error(
-        self,
-        interaction: discord.Interaction,
-        error: app_commands.AppCommandError
-    ) -> None:
-        
-        original_error = getattr(error, 'original', error)
-        short_error = f"{type(original_error).__name__}: {str(original_error)}"
-        command_name = getattr(interaction.command, "name", "unknown command")
+    async def tree_on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        original = getattr(error, "original", error)
+        command = getattr(interaction.command, "qualified_name", "unknown command")
 
         if isinstance(error, app_commands.MissingPermissions):
-            title = "⛔ Missing Permissions"
-            formatted_perms = [
-                perm.replace("_", " ").title() for perm in error.missing_permissions
-            ]
-            missing_list = ", ".join(formatted_perms)
-            desc = f"You do not have the required permissions to use this command.\n\n**Missing:** `{missing_list}`"
-        elif isinstance(original_error, discord.HTTPException):
-            title = "📡 Discord API Error"
-            
-            if original_error.status == 403:
-                desc = "Discord denied the request. The bot might be missing permissions to perform this specific action (e.g., trying to manage a user with a higher role)."
-            elif original_error.status >= 500:
-                desc = "Discord's servers are currently having issues. Please try again later."
-            else:
-                desc = f"The Discord API returned an error.\n\n**Details:**\n> `{original_error.text or short_error}`"
-                log.error("Unhandled exception in command %s", command_name, exc_info=original_error)
-           
+            missing = ", ".join(p.replace("_", " ").title() for p in error.missing_permissions)
+            view = _error_view("Permission needed", f"You need **{missing}** to use this command.")
+        elif isinstance(error, app_commands.NoPrivateMessage):
+            view = _error_view("Server only", "This command only works in a server.")
+        elif isinstance(original, discord.Forbidden):
+            log.warning("Discord refused /%s: %s", command, original)
+            view = _error_view("Discord refused", "Sentiment is missing a permission for that, or the member's role is above Sentiment's.")
+        elif isinstance(original, discord.HTTPException) and original.status >= 500:
+            log.warning("Discord had an error during /%s: %s", command, original)
+            view = _error_view("Discord is having trouble", "Discord's servers had a problem. Try again in a moment.")
         else:
-            title = "⚠️ An Error Occurred"
-            desc = f"**Error Details:**\n> `{short_error}`"
+            log.error("Unhandled exception in /%s", command, exc_info=original)
+            view = _error_view("Something went wrong", "That command didn't go through. Try again in a moment.")
+        await send_ephemeral(interaction, view)
 
-            log.error("Unhandled exception in command %s", command_name, exc_info=original_error)
-           
-        view = ErrorDisplayView(title, desc)
-  
-        try:
-            if interaction.response.is_done():
-                await interaction.followup.send(view=view, ephemeral=True)
-            else:
-                await interaction.response.send_message(view=view, ephemeral=True)
-        except discord.HTTPException as e:
-            log.warning(f"Error handler failed to send the UI to the user: {e}")
-            print(f"[WARNING] Could not send error UI to user: {e}")
-          
-async def setup(bot):
+
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(ErrorHandler(bot))

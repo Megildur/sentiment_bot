@@ -352,14 +352,13 @@ class DiceDatabase:
         return await self.adjust_max_hp(user_id, char_name, max(1, int(target_max)) - old_max)
 
     async def recover_hp(self, user_id: int, char_name: str, roll_total: int, has_unwounded_dice: bool) -> Tuple[int, int, int]:
-        # At 0 HP the roll sets HP; above 0 it adds to it; with every die wounded you get 1 HP.
+        # The rulebook, for a Rest and a Wound alike: the total is your new HP, up to Max HP.
+        # With every Attribute Wounded you only get 1 HP back.
         old_hp, max_hp = await self.get_hp(user_id, char_name)
         if not has_unwounded_dice:
             new_hp = min(max_hp, old_hp + 1)
-        elif old_hp <= 0:
-            new_hp = min(max_hp, max(0, int(roll_total)))
         else:
-            new_hp = min(max_hp, old_hp + max(0, int(roll_total)))
+            new_hp = min(max_hp, max(0, int(roll_total)))
         await self.set_hp(user_id, char_name, new_hp, max_hp)
         return old_hp, new_hp, max_hp
 

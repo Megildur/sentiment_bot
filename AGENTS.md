@@ -161,8 +161,8 @@ bot. Don't add Gift mechanics without the owner.
 
 ### Where the bot differs from the rulebook
 These are known and left for the owner to decide. Don't "fix" them silently; don't add new ones.
-- Roll to Recover above 0 HP adds the total to current HP. The rulebook says the total becomes your
-  HP. At 0 HP the bot follows the rulebook.
+Roll to Recover follows the rulebook exactly, for a Rest as well as a Wound (the owner decided this):
+the total becomes your HP even when that's lower than before.
 - Raising Max HP also raises current HP by the same amount.
 - Roll to Recover also rolls dice lent out as Support.
 - Players set Attribute Levels freely (0 to 9); the bot doesn't charge Potential or count Levels.

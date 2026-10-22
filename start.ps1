@@ -1,8 +1,8 @@
 Write-Host ">>> Pulling newest bot version from Git..." -ForegroundColor Cyan
-try {
-    git pull origin main
-} catch {
-    Write-Host "[!] Warning: git pull failed or local changes exist. Continuing..." -ForegroundColor Yellow
+# Fast-forward only: if this copy has drifted from GitHub, warn instead of merging.
+git pull --ff-only origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[!] Warning: git pull failed (local changes or a diverged branch). Starting the current version..." -ForegroundColor Yellow
 }
 
 function Find-Python {

@@ -263,7 +263,8 @@ it. Helper modules live inside a package or `Source/Utils`, never loose in `Sour
 5. Verify (see Tests). After deploy, new or renamed commands and description changes need `/owner sync`.
 
 ## Tests
-All offline, against a temporary database; none of them log in to Discord.
+All offline, against a temporary database; none of them log in to Discord. `scratch/` is local only
+(gitignored, like Botzilla's), so the tests live in the owner's workspace and never reach the server.
 - `venv\Scripts\python.exe scratch\test_press_everything.py`: runs every command and presses every
   button and form through discord.py's own dispatch, including after simulated restarts, and checks
   who may press, pings, and that no control is kept in memory or sent privately.

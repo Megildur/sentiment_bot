@@ -42,7 +42,7 @@ PAGES: List[Tuple[str, str]] = [
         "• A 20 on the d20 is a **Critical**: damage, or the effect, doubles.\n\n"
         "**`/roll_to_recover`**: after a Rest, or when you take a Wound\n"
         "• Unlocks all your dice, then rolls your Unwounded dice and adds all their bonuses.\n"
-        "• At 0 HP the total becomes your HP; above 0 it's added to your HP. Either way it stops at Max HP.\n"
+        "• The total is your new HP, after a Rest or a Wound alike, never above Max HP.\n"
         "• With every Attribute Wounded, you get 1 HP back. You may set a new Swing from this roll.",
     ),
     (

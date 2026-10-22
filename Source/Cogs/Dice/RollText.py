@@ -125,10 +125,8 @@ def recover_body(display_name: str, dice: List[Die], hp: Tuple[int, int, int]) -
     lines += ["", f"### HP updated: `{old_hp} / {max_hp}` ➔ `{new_hp} / {max_hp} HP`"]
     if not dice:
         lines.append("-# With every Attribute Wounded, you get 1 HP back.")
-    elif old_hp <= 0:
-        lines.append(f"-# At 0 HP, the roll total ({total}) becomes your HP, up to your Max HP.")
     else:
-        lines.append(f"-# The roll total ({total}) is added to your HP, up to your Max HP.")
+        lines.append(f"-# The roll total ({total}) is your new HP, up to your Max HP.")
     return "\n".join(lines)
 
 

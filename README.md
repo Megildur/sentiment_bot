@@ -39,7 +39,8 @@ Support dice and the GM's NPCs, and colors each player's name with their Swing.
   - `/roll_to_dye` rolls every Attribute die that isn't Wounded, Locked or sent as Support. Your Swing die keeps its
     saved result and adds its bonus. **Set Swing** picks a new Swing from the roll.
   - `/roll_to_do` rolls 1d20 plus your Swing, or 1d20 plus a Wild 1d6 while you're colorless. A 20 is a Critical.
-  - `/roll_to_recover` Unlocks every die, rolls your Unwounded dice plus their bonuses for HP, and can set a Swing.
+  - `/roll_to_recover` Unlocks every die and rolls your Unwounded dice plus their bonuses. The total is your new HP,
+    after a Rest or a Wound alike, as in the rulebook. It can also set a Swing.
   - `/roll_wild` rolls a single 1d6.
 - **HP and leveling.** `/hp damage` and `/hp heal`, with the 0 HP steps from the rulebook (Roll to Recover, then
   Wound an Attribute, or Leave the Scene). `/hp max` spends Potential on Max HP using the rulebook's brackets, or
@@ -113,7 +114,7 @@ Server role order
 | `/character_card` | Everyone | Your character sheet: HP, Swing, Attributes, Locked and Wounded dice. |
 | `/roll_to_dye` | Everyone | Roll every available Attribute die. Has **Set Swing** and **Apply Support die**. |
 | `/roll_to_do` | Everyone | Roll 1d20 plus your Swing, or 1d20 plus a Wild 1d6. |
-| `/roll_to_recover` | Everyone | Unlock every die and roll your Unwounded dice for HP. Has **Set Swing**. |
+| `/roll_to_recover` | Everyone | Unlock every die and roll your Unwounded dice; the total is your new HP. Has **Set Swing**. |
 | `/roll_wild` | Everyone | Roll a single 1d6. |
 | `/hp damage <amount>` | Everyone | Take damage. At 0 HP it lists the Wound steps. |
 | `/hp heal <amount>` | Everyone | Heal, up to Max HP. |

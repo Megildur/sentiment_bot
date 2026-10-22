@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakes import Harness, check, finish, member  # noqa: E402
 
 
+from Source.Cogs.Dice.Constants import hp_bracket  # noqa: E402
 from Source.Cogs.Dice.RollText import parse_roll  # noqa: E402
 
 random.seed(7)
@@ -147,6 +148,14 @@ async def rolls(h: Harness, a, b) -> None:
     check(parse_roll(recover.text).hp == rec.hp, "HP line kept after picking a Swing")
     check((await h.db.get_swing(a.id, "Aria"))[0] == "Blue", "new Swing from Roll to Recover")
 
+    # Resting above 0 HP: the rulebook makes the total the new HP too, never above Max HP.
+    await h.db.set_hp(a.id, "Aria", 8, 30)
+    i = await h.command("roll_to_recover", a)
+    rest = parse_roll(i.original.text)
+    rest_total = sum(d.roll + (d.bonus or 0) for d in rest.dice)
+    check(await h.db.get_hp(a.id, "Aria") == (min(30, rest_total), 30), f"a Rest sets HP to the total: {rest_total}")
+    check(rest.hp == (8, min(30, rest_total), 30), f"the roll shows the Rest: {rest.hp}")
+
     i = await h.command("hp_heal", a, 3)
     check("Healed" in i.original.text, "heal posts a result")
 
@@ -181,10 +190,11 @@ async def card_and_hp(h: Harness, a, b) -> None:
     await h.press(card, "manage_max_hp_btn", a)
     check(card.control("pot_flat_hp_btn") is not None, "Max HP panel opened in place")
     cur, mx = await h.db.get_hp(a.id, "Aria")
+    gain = hp_bracket(mx)["flat_gain"]
     await h.press(card, "pot_flat_hp_btn", a)
-    check(await h.db.get_hp(a.id, "Aria") == (cur + 5, mx + 5), "flat Potential: +5 Max HP and current HP")
+    check(await h.db.get_hp(a.id, "Aria") == (cur + gain, mx + gain), f"flat Potential: +{gain} Max HP and current HP")
     await h.press(card, "pot_roll_hp_btn", a)
-    check((await h.db.get_hp(a.id, "Aria"))[1] > mx + 5, "rolled Potential raises Max HP")
+    check((await h.db.get_hp(a.id, "Aria"))[1] >= mx + gain, "rolled Potential never lowers Max HP")
     i = await h.press(card, "custom_adj_max_hp_btn", a)
     await h.submit(i, exact_input="25", delta_input="")
     check((await h.db.get_hp(a.id, "Aria"))[1] == 25, "exact Max HP")

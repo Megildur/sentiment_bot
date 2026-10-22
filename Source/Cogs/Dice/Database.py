@@ -73,7 +73,10 @@ class DiceDatabase:
         await self.db.execute("CREATE TABLE IF NOT EXISTS attributes_names (user_id INTEGER, char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (user_id, attribute, char_name))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS support_die (share_support_user_id INTEGER, recieve_support_user_id INTEGER, share_support_char_name TEXT, recieve_support_char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS selected_char (user_id INTEGER PRIMARY KEY, char_name TEXT)")
+        # Sentiment used to have one GM for every server; that row is kept, and only read once
+        # to give that GM the servers they share with Sentiment (see Dice._move_gm_to_servers).
         await self.db.execute("CREATE TABLE IF NOT EXISTS gm (value INTEGER PRIMARY KEY CHECK (value = 1), user_id INTEGER)")
+        await self.db.execute("CREATE TABLE IF NOT EXISTS guild_gm (guild_id INTEGER PRIMARY KEY, user_id INTEGER)")
         await self.db.execute("CREATE TABLE IF NOT EXISTS npc (value INTEGER CHECK (value = 1), char_name TEXT, PRIMARY KEY (value, char_name))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS swing (user_id INTEGER, char_name TEXT, swing TEXT, swing_value INTEGER, PRIMARY KEY (user_id, char_name))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS wounded (user_id INTEGER, char_name TEXT, wounded TEXT, PRIMARY KEY (user_id, char_name, wounded))")
@@ -110,17 +113,27 @@ class DiceDatabase:
             await self.db.commit()
             return rowcount
 
-    # The GM (one for every server)
+    # Each server's GM. Outside a server (guild_id None) there is no GM.
 
-    async def get_gm(self) -> Optional[int]:
+    async def get_gm(self, guild_id: Optional[int]) -> Optional[int]:
+        if guild_id is None:
+            return None
+        row = await self._one("SELECT user_id FROM guild_gm WHERE guild_id = ?", (guild_id,))
+        return row[0] if row else None
+
+    async def set_gm(self, guild_id: int, user_id: int) -> None:
+        await self._write(("INSERT OR REPLACE INTO guild_gm (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id)))
+
+    async def is_gm(self, guild_id: Optional[int], user_id: int) -> bool:
+        return guild_id is not None and await self.get_gm(guild_id) == user_id
+
+    async def get_legacy_gm(self) -> Optional[int]:
+        """The one GM for every server from before GMs were per server, if there was one."""
         row = await self._one("SELECT user_id FROM gm WHERE value = 1")
         return row[0] if row else None
 
-    async def set_gm(self, user_id: int) -> None:
-        await self._write(("INSERT OR REPLACE INTO gm (value, user_id) VALUES (1, ?)", (user_id,)))
-
-    async def is_gm(self, user_id: int) -> bool:
-        return await self.get_gm() == user_id
+    async def has_server_gms(self) -> bool:
+        return await self._one("SELECT 1 FROM guild_gm LIMIT 1") is not None
 
     # Characters and attributes
 

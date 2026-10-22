@@ -68,7 +68,9 @@ async def active_character(interaction: discord.Interaction, user_id: int) -> Op
 # Panels
 
 
-async def attribute_panel(client: discord.Client, db, user_id: int, char_name: str, note: Optional[str] = None) -> discord.ui.LayoutView:
+async def attribute_panel(
+    client: discord.Client, db, guild_id: Optional[int], user_id: int, char_name: str, note: Optional[str] = None,
+) -> discord.ui.LayoutView:
     state = await db.get_character_state(user_id, char_name)
     chars = await db.get_all_characters(user_id)
     user = client.get_user(user_id)
@@ -92,9 +94,9 @@ async def attribute_panel(client: discord.Client, db, user_id: int, char_name: s
         row(ChangeCharSelect(chars, char_name)),
         section("**New character.**\n-# Starts at 10 / 10 HP.", CreateCharacterButton()),
     ]
-    if await db.is_gm(user_id):
+    if await db.is_gm(guild_id, user_id):
         is_npc = await db.is_npc(char_name)
-        items.append(section(f"**NPC:** {'Yes' if is_npc else 'No'}\n-# Only the GM sees this.", ToggleNPCButton(is_npc)))
+        items.append(section(f"**NPC:** {'Yes' if is_npc else 'No'}\n-# Only this server's GM sees this.", ToggleNPCButton(is_npc)))
     items += [
         separator(large=True),
         discord.ui.TextDisplay("**Delete a character**"),
@@ -277,7 +279,9 @@ async def _fetch_message(client: discord.Client, channel_id: int, message_id: in
     return await channel.fetch_message(message_id)
 
 
-async def _panel_for(client: discord.Client, db, view_type: str, user_id: int, char_name: str) -> Tuple[discord.ui.LayoutView, str, str]:
+async def _panel_for(
+    client: discord.Client, db, guild_id: Optional[int], view_type: str, user_id: int, char_name: str,
+) -> Tuple[discord.ui.LayoutView, str, str]:
     if not char_name:
         if view_type == CREATE:
             return create_character_view(), CREATE, ""
@@ -286,7 +290,7 @@ async def _panel_for(client: discord.Client, db, view_type: str, user_id: int, c
         return await character_card(db, user_id, char_name), CARD, char_name
     if view_type == MAX_HP:
         return await max_hp_panel(db, user_id, char_name), MAX_HP, char_name
-    return await attribute_panel(client, db, user_id, char_name), ATTRIBUTES, char_name
+    return await attribute_panel(client, db, guild_id, user_id, char_name), ATTRIBUTES, char_name
 
 
 async def refresh_tracked_messages(client: discord.Client, db, user_id: int, char_name: str, exclude_message_id: Optional[int] = None) -> None:
@@ -304,7 +308,8 @@ async def refresh_tracked_messages(client: discord.Client, db, user_id: int, cha
         try:
             message = await _fetch_message(client, channel_id, message_id)
             if is_panel:
-                view, new_type, new_char = await _panel_for(client, db, view_type, user_id, char_name)
+                guild_id = message.guild.id if message.guild else None
+                view, new_type, new_char = await _panel_for(client, db, guild_id, view_type, user_id, char_name)
                 await message.edit(view=view, allowed_mentions=discord.AllowedMentions.none())
                 await db.track_active_view(user_id, channel_id, message_id, new_type, new_char)
                 continue
@@ -339,7 +344,7 @@ async def show_attributes(interaction: discord.Interaction, user_id: int, char_n
     if not char_name:
         await show(interaction, no_characters_view(), NO_CHARACTERS, user_id, "", changed=changed)
         return
-    view = await attribute_panel(interaction.client, dice_db(interaction), user_id, char_name, note)
+    view = await attribute_panel(interaction.client, dice_db(interaction), interaction.guild_id, user_id, char_name, note)
     await show(interaction, view, ATTRIBUTES, user_id, char_name, changed=changed)
 
 
@@ -391,7 +396,7 @@ class CreateCharacterModal(DiceModal, title="Create a character"):
         sync_color_role_later(interaction, user_id)
 
         if interaction.message is not None and interaction.message.flags.ephemeral:
-            view = await attribute_panel(interaction.client, db, user_id, char_name, "-# Character created.")
+            view = await attribute_panel(interaction.client, db, interaction.guild_id, user_id, char_name, "-# Character created.")
             await interaction.response.send_message(view=view)
             return
         await show_attributes(interaction, user_id, char_name, "-# Character created.")
@@ -649,7 +654,7 @@ class DeleteAttributeButton(DiceItem, discord.ui.DynamicItem[discord.ui.Button],
 
 class ToggleNPCButton(DiceItem, discord.ui.DynamicItem[discord.ui.Button], template=r"toggle_npc_btn"):
     denied_title = "GM only"
-    denied_text = "Only the GM can mark a character as an NPC."
+    denied_text = "Only this server's GM can mark a character as an NPC."
 
     def __init__(self, is_npc: bool) -> None:
         super().__init__(discord.ui.Button(
@@ -659,7 +664,7 @@ class ToggleNPCButton(DiceItem, discord.ui.DynamicItem[discord.ui.Button], templ
         ))
 
     async def allowed(self, interaction: discord.Interaction) -> bool:
-        return await dice_db(interaction).is_gm(interaction.user.id)
+        return await dice_db(interaction).is_gm(interaction.guild_id, interaction.user.id)
 
     async def run(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()

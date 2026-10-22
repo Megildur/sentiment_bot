@@ -131,6 +131,7 @@ class FakeMessage:
         self.channel = harness.channel
         self.flags = SimpleNamespace(components_v2=True, ephemeral=ephemeral)
         self.interaction_metadata = SimpleNamespace(user=SimpleNamespace(id=owner_id)) if owner_id else None
+        self.guild = harness.guild if harness.in_guild else None
         self.ephemeral = ephemeral
         self.allowed_mentions = allowed_mentions
         self.deleted = False
@@ -256,8 +257,15 @@ class FakeBot:
     def get_cog(self, name: str) -> Any:
         return self.cogs.get(name)
 
+    @property
+    def guilds(self) -> List[FakeGuild]:
+        return self.harness.guilds
+
     def get_guild(self, guild_id: int) -> Optional[FakeGuild]:
-        return self.harness.guild if guild_id == self.harness.guild.id else None
+        return next((g for g in self.harness.guilds if g.id == guild_id), None)
+
+    async def wait_until_ready(self) -> None:
+        return None
 
     def get_user(self, user_id: int) -> Any:
         return SimpleNamespace(id=user_id, display_name=f"user{user_id}")
@@ -283,6 +291,9 @@ class Harness:
         self.messages: dict = {}
         self.channel = FakeChannel(self)
         self.guild = FakeGuild(1, discord.Permissions(manage_roles=True))
+        # A second server, to check what's per server stays there.
+        self.other_guild = FakeGuild(1, discord.Permissions(manage_roles=True))
+        self.guilds = [self.guild, self.other_guild]
         self.in_guild = True
         self.bot = FakeBot(self)
         self.cog = None

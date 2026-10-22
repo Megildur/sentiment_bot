@@ -221,10 +221,10 @@ async def switching(h: Harness, a, b) -> None:
 
 async def gm(h: Harness, a, b, c) -> None:
     i = await h.command("set_gm_c", c, b)
-    check(i.notices() == ["Permission needed"] and await h.db.get_gm() is None, "members without Manage Server can't choose the GM")
+    check(i.notices() == ["Permission needed"] and await h.db.get_gm(h.guild.id) is None, "members without Manage Server can't choose the GM")
 
     i = await h.command("set_gm_c", a, b)
-    check(await h.db.get_gm() == b.id, "A (Manage Server) made B the GM")
+    check(await h.db.get_gm(h.guild.id) == b.id, "A (Manage Server) made B the GM")
     check([u.id for u in i.original.allowed_mentions.users] == [b.id], "the new GM is pinged")
 
     i = await h.command("set_gm_c", b, c)
@@ -234,7 +234,7 @@ async def gm(h: Harness, a, b, c) -> None:
     check(other.notices() == ["Not your menu"], "only whoever ran /set_gm confirms")
     await h.restart()
     confirm = await h.press(prompt, "confirm_dm", b)
-    check(await h.db.get_gm() == c.id, "GM changed after confirming")
+    check(await h.db.get_gm(h.guild.id) == c.id, "GM changed after confirming")
     check(prompt.control("confirm_dm").disabled, "the prompt is greyed out")
     check(confirm.sent and f"<@{c.id}>" in confirm.sent[0].text, "the new GM is announced")
 
@@ -248,6 +248,18 @@ async def gm(h: Harness, a, b, c) -> None:
     check(gm_panel.control("toggle_npc_btn") is not None, "the GM's panel offers NPC marking")
     await h.press(gm_panel, "toggle_npc_btn", c)
     check(await h.db.get_char_display_name("Villain") == "Villain (NPC)", "marked as NPC")
+    # Each server has its own GM: C is the GM here, not in the other server.
+    home = h.guild
+    h.guild = h.other_guild
+    i = await h.command("set_attributes_command", a)
+    away_panel = i.original
+    other_server = await h.press(away_panel, "add_atrs_btn", c)
+    check(other_server.notices() == ["Not your menu"], f"the GM of one server has no say in another: {other_server.notices()}")
+    check(await h.db.get_gm(h.other_guild.id) is None, "the other server has no GM yet")
+    i = await h.command("set_gm_c", a, b)
+    check(await h.db.get_gm(h.other_guild.id) == b.id and await h.db.get_gm(home.id) == c.id, "setting a GM in one server leaves the other alone")
+    h.guild = home
+
     other = await h.press(gm_panel, "toggle_npc_btn", a)
     check(other.notices() in (["Not your menu"], ["GM only"]), f"only the GM marks NPCs: {other.notices()}")
 
@@ -289,6 +301,22 @@ async def color_roles(h: Harness, a, b) -> None:
     check(red not in h.guild.get_member(a.id).roles, "dropping the Swing removes the role")
 
 
+async def legacy_gm() -> None:
+    """The one GM for every server from older versions becomes the GM of each server they share."""
+    h = await Harness().start()
+    try:
+        old_gm = member(h, 201)
+        await h.db._write(("INSERT OR REPLACE INTO gm (value, user_id) VALUES (1, ?)", (old_gm.id,)))
+        await h.restart()
+        check(await h.db.get_gm(h.guild.id) == old_gm.id, "the old GM keeps the server they're in")
+        check(await h.db.get_gm(h.other_guild.id) is None, "but not a server they aren't in")
+        await h.db._write(("INSERT OR REPLACE INTO gm (value, user_id) VALUES (1, ?)", (999,)))
+        await h.restart()
+        check(await h.db.get_gm(h.guild.id) == old_gm.id, "the move happens once")
+    finally:
+        await h.cog.cog_unload()
+
+
 async def main() -> None:
     h = await Harness().start()
     a = member(h, 101, manage_guild=True, manage_roles=True)
@@ -303,6 +331,7 @@ async def main() -> None:
         await gm(h, a, b, c)
         await help_pages(h, a)
         await color_roles(h, a, b)
+        await legacy_gm()
     finally:
         # Closes the database thread, or a failure would leave the process hanging.
         await h.cog.cog_unload()

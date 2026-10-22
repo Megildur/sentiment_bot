@@ -98,8 +98,9 @@ PAGES: List[Tuple[str, str]] = [
     (
         "## ⚖️ GM, Scenes and Conflicts",
         "**`/set_gm`**\n"
-        "• Choose the GM. Members with Manage Server, and the current GM, can do this.\n"
-        "• The GM can mark characters as **NPCs** in `/set_attributes`, and use any player's rolls and character panels.\n\n"
+        "• Choose this server's GM. Members with Manage Server, and the server's current GM, can do this.\n"
+        "• The GM can mark characters as **NPCs** in `/set_attributes`, and use any player's rolls and character panels "
+        "in their server.\n\n"
         "**Target numbers** (beat it to succeed)\n"
         "Very Easy 5 · Easy 10 · Normal 15 · Hard 20 · Very Hard 25 · Extreme 30\n\n"
         "**Clash**\n"

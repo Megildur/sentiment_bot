@@ -47,8 +47,8 @@ Support dice and the GM's NPCs, and colors each player's name with their Swing.
 - **Dice states and Support.** `/lock_die` and `/unlock_die` (Locking your Swing die Ignites it), `/wound_die` and
   `/unwound_die` (a Wound Unlocks every die), `/drop_swing`, and `/support` to send an ally a die they can add to
   their next roll; it comes back to you Locked.
-- **GM tools.** `/set_gm` chooses the Game Master, who can mark characters as NPCs and use any player's rolls and
-  character panels.
+- **GM tools.** Each server has its own Game Master, chosen with `/set_gm`. The GM can mark characters as NPCs and
+  use any player's rolls and character panels in that server.
 - **Swing color roles.** A player's name in chat takes their Swing's color. Setting a Swing gives the role; dropping
   it (`/drop_swing`, Locking or Wounding the Swing die, switching characters) removes it. `/color_roles` sets up the
   10 roles and syncs players.
@@ -78,7 +78,7 @@ Discord colors a member's name with their **highest role that has a color**, so 
 5. Run `/color_roles` and press **Set up roles**. It finds or creates the 10 roles and syncs every player.
 
 **Sync my role** fixes one player whose Swing was set before the roles existed; **Sync all players** does everyone.
-Setting up roles, picking a role for a color and syncing everyone need **Manage Roles** or being the GM.
+Setting up roles, picking a role for a color and syncing everyone need **Manage Roles** or being the server's GM.
 
 ```
 Server role order
@@ -123,7 +123,7 @@ Server role order
 | `/drop_swing` | Everyone | Drop your Swing and become colorless. Removes your color role. |
 | `/support <user>` | Everyone | Send an ally a die for their next roll. It comes back to you Locked. |
 | `/color_roles` | Everyone; setup needs Manage Roles or GM | Set up and sync the swing color roles. |
-| `/set_gm <user>` | Manage Server, or the current GM | Choose the Game Master. |
+| `/set_gm <user>` | Manage Server, or the server's current GM | Choose this server's Game Master. |
 
 ---
 

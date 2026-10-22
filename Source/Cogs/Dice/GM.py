@@ -1,4 +1,4 @@
-"""/set_gm: choosing the Game Master, who can mark NPCs and use any player's rolls and panels."""
+"""/set_gm: choosing a server's Game Master, who can mark NPCs and use any player's rolls and panels there."""
 import logging
 import re
 from typing import Union
@@ -19,17 +19,17 @@ _NEW_GM = re.compile(r"(?:change the gm to|Make) <@!?(\d+)>", re.I)
 
 
 async def may_choose_gm(interaction: discord.Interaction) -> bool:
-    """Members with Manage Server, and the current GM, choose the GM. Says so to anyone else."""
-    if member_has(interaction.user, "manage_guild") or await dice_db(interaction).is_gm(interaction.user.id):
+    """Members with Manage Server, and the server's current GM, choose its GM. Says so to anyone else."""
+    if member_has(interaction.user, "manage_guild") or await dice_db(interaction).is_gm(interaction.guild_id, interaction.user.id):
         return True
-    return await require_member_permissions(interaction, "manage_guild", or_also="be the GM", to="choose the GM")
+    return await require_member_permissions(interaction, "manage_guild", or_also="be this server's GM", to="choose the GM")
 
 
 async def announce_gm(interaction: discord.Interaction, new_gm: int) -> None:
-    """Post that `new_gm` is the GM, pinging them unless they chose themselves."""
+    """Post that `new_gm` is the server's GM, pinging them unless they chose themselves."""
     view = discord.ui.LayoutView()
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"## ⚖️ New GM\n<@{new_gm}> is now the GM."),
+        discord.ui.TextDisplay(f"## ⚖️ New GM\n<@{new_gm}> is now this server's GM."),
         accent_colour=Theme.BRAND,
     ))
     ping = [new_gm] if new_gm != interaction.user.id else []
@@ -37,19 +37,22 @@ async def announce_gm(interaction: discord.Interaction, new_gm: int) -> None:
 
 
 async def set_gm(interaction: discord.Interaction, user: Union[discord.User, discord.Member]) -> None:
+    if interaction.guild_id is None:
+        await notify(interaction, "Server only", "Each server has its own GM, so run `/set_gm` in a server.")
+        return
     if not await may_choose_gm(interaction):
         return
     db = dice_db(interaction)
-    current = await db.get_gm()
+    current = await db.get_gm(interaction.guild_id)
     if current is not None and current != user.id:
         prompt = lasting_view(
-            discord.ui.TextDisplay(f"## ⚖️ Change the GM?\n<@{current}> is the GM. Make <@{user.id}> the GM instead?"),
+            discord.ui.TextDisplay(f"## ⚖️ Change the GM?\n<@{current}> is this server's GM. Make <@{user.id}> the GM instead?"),
             section("-# Press to confirm.", ConfirmGMButton()),
             accent=Theme.ACCENT,
         )
         await interaction.response.send_message(view=prompt, allowed_mentions=discord.AllowedMentions.none())
         return
-    await db.set_gm(user.id)
+    await db.set_gm(interaction.guild_id, user.id)
     await announce_gm(interaction, user.id)
 
 
@@ -60,14 +63,14 @@ class ConfirmGMButton(DiceItem, discord.ui.DynamicItem[discord.ui.Button], templ
         super().__init__(discord.ui.Button(label="Make GM", style=discord.ButtonStyle.success, custom_id="confirm_dm"))
 
     async def run(self, interaction: discord.Interaction) -> None:
-        if not await may_choose_gm(interaction):
+        if interaction.guild_id is None or not await may_choose_gm(interaction):
             return
         match = _NEW_GM.search(message_text(interaction.message))
         if not match:
             await notify(interaction, "Couldn't change the GM", "Sentiment couldn't tell who the new GM is. Run `/set_gm` again.")
             return
         new_gm = int(match.group(1))
-        await dice_db(interaction).set_gm(new_gm)
+        await dice_db(interaction).set_gm(interaction.guild_id, new_gm)
         await announce_gm(interaction, new_gm)
         try:
             await disable_message_controls(interaction.message)

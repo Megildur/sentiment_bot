@@ -9,8 +9,8 @@
     <img src="https://img.shields.io/badge/Support%20Server-Join%20Community-57F287?style=for-the-badge&logo=discord&logoColor=white" alt="Support Server" />
   </a>
   &nbsp;
-  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.1.0">
-    <img src="https://img.shields.io/badge/Release-v1.1.0-blue?style=for-the-badge" alt="Release v1.1.0" />
+  <a href="https://github.com/Megildur/sentiment_bot/releases/tag/v1.2.0">
+    <img src="https://img.shields.io/badge/Release-v1.2.0-blue?style=for-the-badge" alt="Release v1.2.0" />
   </a>
 </p>
 

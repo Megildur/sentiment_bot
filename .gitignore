@@ -4,6 +4,7 @@ venv/
 
 # Logs and Caches
 *.log
+*.log.*
 __pycache__/
 *.pyc
 Data/

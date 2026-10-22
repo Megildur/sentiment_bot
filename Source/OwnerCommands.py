@@ -1,292 +1,157 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
+"""/owner: syncing commands and reloading extensions, only in the servers listed in ALLOWED_GUILDS."""
+import logging
 import os
-from typing import Literal
-from dotenv import load_dotenv
+from typing import List, Literal
 
-load_dotenv()
+import discord
+from discord import app_commands
+from discord.ext import commands
 
-allowed_guilds_str = os.getenv('ALLOWED_GUILDS', '')
+from Source.Utils import Theme
+
+log = logging.getLogger(__name__)
+
 ALLOWED_GUILDS = [
-    discord.Object(id=int(g.strip())) 
-    for g in allowed_guilds_str.split(',') 
+    discord.Object(id=int(g.strip()))
+    for g in os.getenv("ALLOWED_GUILDS", "").split(",")
     if g.strip().isdigit()
 ]
 
-def get_all_extensions() -> list[str]:
+
+def get_all_extensions() -> List[str]:
+    """Every loadable extension under Source. Utils is helpers, not extensions."""
     extensions = []
-    for root, dirs, files in os.walk('Source'):
-        dirs[:] = [d for d in dirs if d not in ['__pycache__', 'Utils', 'utils']]
-            
-        if '__init__.py' in files:
-            ext_name = root.replace(os.sep, '.')
-            extensions.append(ext_name)
+    for root, dirs, files in os.walk("Source"):
+        dirs[:] = [d for d in dirs if d not in ("__pycache__", "Utils", "utils")]
+        if "__init__.py" in files:
+            extensions.append(root.replace(os.sep, "."))
             dirs.clear()
         else:
-            for file in files:
-                if file.endswith('.py'):
-                    ext_name = os.path.join(root, file[:-3]).replace(os.sep, '.')
-                    extensions.append(ext_name)
+            extensions.extend(os.path.join(root, f[:-3]).replace(os.sep, ".") for f in files if f.endswith(".py"))
     return extensions
+
+
+def _result_view(title: str, body: str, color: discord.Colour) -> discord.ui.LayoutView:
+    view = discord.ui.LayoutView()
+    view.add_item(discord.ui.Container(discord.ui.TextDisplay(f"### {title}"), discord.ui.TextDisplay(body), accent_colour=color))
+    return view
+
+
+def _names(names: List[str]) -> str:
+    text = ", ".join(f"`{n}`" for n in names)
+    return text if len(text) <= 1500 else text[:1500].rsplit(",", 1)[0] + ", ..."
+
 
 @app_commands.guilds(*ALLOWED_GUILDS)
 @app_commands.default_permissions(administrator=True)
-class OwnerCog(commands.GroupCog, group_name='owner'):
-    def __init__(self, bot) -> None:
+class OwnerCog(commands.GroupCog, group_name="owner"):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name='sync', description='Syncs the bot commands')
-    async def sync(self, interaction: discord.Interaction, sync_type: Literal['Global', 'Guild']) -> None:
+    @app_commands.command(name="sync", description="Sync the bot's commands with Discord")
+    async def sync(self, interaction: discord.Interaction, sync_type: Literal["Global", "Guild"]) -> None:
         await interaction.response.defer(ephemeral=False)
-        
+        await interaction.followup.send(view=_result_view(f"Syncing ({sync_type})", "This can take a few moments.", Theme.ACCENT))
         try:
-            loading_layout = discord.ui.LayoutView()
-            loading_container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f'# 🔄 Command Sync ({sync_type})'),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=f'> Starting {sync_type.lower()} command synchronization...'),
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                discord.ui.TextDisplay(content='This may take a few moments'),
-                accent_colour=discord.Colour.yellow()
-            )
-            loading_layout.add_item(loading_container)
-            await interaction.followup.send(view=loading_layout)
-
-            if sync_type == 'Global':
-                synced = await self.bot.tree.sync(guild=None)
-                target_text = "globally"
+            if sync_type == "Global":
+                synced = [c.name for c in await self.bot.tree.sync(guild=None)]
+                where = "globally"
             else:
                 synced = []
-                for guild_obj in ALLOWED_GUILDS:
-                    synced = await self.bot.tree.sync(guild=guild_obj)
-                target_text = f"across **{len(ALLOWED_GUILDS)} allowed guilds**"
+                for guild in ALLOWED_GUILDS:
+                    synced += [c.name for c in await self.bot.tree.sync(guild=guild)]
+                where = f"to {len(ALLOWED_GUILDS)} allowed servers"
+        except Exception:
+            log.exception("Command sync (%s) failed", sync_type)
+            await interaction.edit_original_response(view=_result_view("Sync failed", f"Couldn't sync commands {sync_type.lower()}. The error is in the log.", Theme.ERROR))
+            return
+        names = sorted(set(synced))
+        body = f"Synced **{len(synced)}** commands {where}.\n\n{_names(names) if names else 'No commands to sync.'}"
+        await interaction.edit_original_response(view=_result_view("Sync complete", body, Theme.BRAND))
+        log.info("Synced %d commands %s: %s", len(synced), where, ", ".join(names))
 
-            result_layout = discord.ui.LayoutView()
-            content_lines = ["\n>>> **📝 Synced Commands**"]
-            
-            if synced:
-                command_list = '\n'.join([f'• `{command.name}`' for command in synced])
-                display_list = command_list if len(command_list) < 1024 else f'{command_list[:1000]}...\n*+{len(synced)-command_list[:1000].count("•")} more*'
-                content_lines.append(display_list)
-            else:
-                content_lines.append("No commands found to sync.")
-                
-            main_text = discord.ui.TextDisplay(content='\n'.join(content_lines))
-            footer_text = discord.ui.TextDisplay(content="-# All commands are now available • Sync completed")
-            
-            avatar_url = self.bot.user.avatar.url if self.bot.user.avatar else None
-            if avatar_url:
-                footer_element = discord.ui.Section(
-                    footer_text,
-                    accessory=discord.ui.Thumbnail(media=avatar_url)
-                )
-            else:
-                footer_element = footer_text
-                
-            success_container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f"### ✅ Sync Successful\n**{len(synced)} commands** have been synchronized {target_text}"),
-                discord.ui.Separator(),
-                main_text,
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                footer_element,
-                accent_colour=discord.Colour.green()
-            )
-            result_layout.add_item(success_container)
-            await interaction.edit_original_response(view=result_layout)
-            
-            print(f"Synced {len(synced)} commands {target_text.replace('**', '')}")
-            for command in synced:
-                print(f"  - {command.name}")
-
-        except Exception as e:
-            error_layout = discord.ui.LayoutView()
-            error_container = discord.ui.Container(
-                discord.ui.TextDisplay(content='### ❌ Sync Error'),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=f'Failed to sync commands {sync_type.lower()}.'),
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                discord.ui.TextDisplay(content=f'🔍 **Error Details**\n```{str(e)[:1000]}```'),
-                accent_colour=discord.Colour.red()
-            )
-            error_layout.add_item(error_container)
-            await interaction.edit_original_response(view=error_layout)
-            print(f"Error during sync: {e}")
-
-    @app_commands.command(name='sync_clear', description='Clears all commands from the tree')
-    async def sync_clear(self, interaction: discord.Interaction, clear_type: Literal['Global', 'Guild']) -> None:
+    @app_commands.command(name="sync_clear", description="Remove all commands from the local tree (sync afterwards to apply)")
+    async def sync_clear(self, interaction: discord.Interaction, clear_type: Literal["Global", "Guild"]) -> None:
         await interaction.response.defer(ephemeral=False)
-        try:
-            loading_layout = discord.ui.LayoutView()
-            loading_container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f'# 🗑️ Clearing Commands ({clear_type})'),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=f'> Removing all {clear_type.lower()} commands from the command tree...'),
-                accent_colour=discord.Colour.orange()
-            )
-            loading_layout.add_item(loading_container)
-            await interaction.followup.send(view=loading_layout)
+        if clear_type == "Global":
+            count = len(self.bot.tree.get_commands(guild=None))
+            self.bot.tree.clear_commands(guild=None)
+            where = "the global tree"
+        else:
+            count = len(self.bot.tree.get_commands(guild=interaction.guild))
+            self.bot.tree.clear_commands(guild=interaction.guild)
+            where = f"**{interaction.guild.name}**'s tree"
+        body = f"Removed **{count}** commands from {where}. Discord keeps showing them until the next `/owner sync`."
+        await interaction.followup.send(view=_result_view("Commands cleared", body, Theme.ACCENT))
+        log.info("Cleared %d commands from %s", count, where.replace("**", ""))
 
-            if clear_type == 'Global':
-                before_count = len(self.bot.tree.get_commands(guild=None))
-                self.bot.tree.clear_commands(guild=None)
-                target_text = "globally"
-            else:
-                before_count = len(self.bot.tree.get_commands(guild=interaction.guild))
-                self.bot.tree.clear_commands(guild=interaction.guild)
-                target_text = f"from **{interaction.guild.name}**"
-
-            result_layout = discord.ui.LayoutView()
-            success_container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f"### 🧹 Commands Cleared\nSuccessfully removed **{before_count} commands** {target_text}."),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content="### 📊 Summary"),
-                discord.ui.TextDisplay(content=f"• **{before_count}** commands removed\n• Command tree is now empty\n• Users will no longer see slash commands"),
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                discord.ui.TextDisplay(content="-# Use /sync to re-add commands to the tree"),
-                accent_colour=discord.Colour.green()
-            )
-            result_layout.add_item(success_container)
-            await interaction.edit_original_response(view=result_layout)
-            print(f"Cleared {before_count} commands {target_text.replace('**', '')}")
-
-        except Exception as e:
-            error_layout = discord.ui.LayoutView()
-            error_container = discord.ui.Container(
-                discord.ui.TextDisplay(content='### ❌ Clear Failed'),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content='An error occurred while clearing commands.'),
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                discord.ui.TextDisplay(content=f'🔍 **Error Details**\n```{str(e)[:1000]}```'),
-                accent_colour=discord.Colour.red()
-            )
-            error_layout.add_item(error_container)
-            await interaction.edit_original_response(view=error_layout)
-            print(f"Error clearing commands: {e}")
-
-    @app_commands.command(name="ext", description="Loads, unloads, or reloads an extension")
+    @app_commands.command(name="ext", description="Load, unload or reload an extension")
     async def ext(self, interaction: discord.Interaction, action: Literal["load", "unload", "reload"], extension: str) -> None:
         await interaction.response.defer(ephemeral=False)
-        
-        error_msg = None
-        color = discord.Colour.green()
-        
+        error = None
         try:
             if action == "load":
                 await self.bot.load_extension(extension)
             elif action == "unload":
                 await self.bot.unload_extension(extension)
-                color = discord.Colour.yellow()
-            elif action == "reload":
+            else:
                 await self.bot.reload_extension(extension)
         except commands.ExtensionAlreadyLoaded:
-            error_msg = "Extension is already loaded."
+            error = "It's already loaded."
         except commands.ExtensionNotLoaded:
-            error_msg = "Extension is not currently loaded."
+            error = "It isn't loaded."
         except commands.ExtensionNotFound:
-            error_msg = "Extension file or package was not found."
+            error = "No extension has that name."
         except commands.ExtensionFailed as e:
-            error_msg = f"Extension failed during setup.\n```{str(e)}```"
+            log.error("Extension %s failed during %s", extension, action, exc_info=e.original)
+            error = f"It failed while loading (`{type(e.original).__name__}`). The traceback is in the log."
         except Exception as e:
-            error_msg = f"Unexpected error occurred.\n```{str(e)}```"
+            log.exception("Unexpected error during %s of %s", action, extension)
+            error = f"Unexpected error (`{type(e).__name__}`). The traceback is in the log."
 
-        result_layout = discord.ui.LayoutView()
-        if error_msg:
-            container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f"### ❌ Action Failed: {action.capitalize()}"),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=f"Target: `{extension}`\n\n> {error_msg}"),
-                accent_colour=discord.Colour.red()
-            )
+        if error:
+            view = _result_view(f"Couldn't {action} `{extension}`", error, Theme.ERROR)
         else:
-            container = discord.ui.Container(
-                discord.ui.TextDisplay(content=f"### ✅ Extension {action.capitalize()}ed"),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content=f"Successfully {action}ed `{extension}`."),
-                accent_colour=color
-            )
-            
-        result_layout.add_item(container)
-        await interaction.followup.send(view=result_layout)
+            view = _result_view(f"Extension {action}ed", f"`{extension}`", Theme.ACCENT if action == "unload" else Theme.BRAND)
+        await interaction.followup.send(view=view)
 
-    @ext.autocomplete('extension')
-    async def ext_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        extensions = get_all_extensions()
-        return [
-            app_commands.Choice(name=ext, value=ext)
-            for ext in extensions if current.lower() in ext.lower()
-        ][:25]
+    @ext.autocomplete("extension")
+    async def ext_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        return [app_commands.Choice(name=e, value=e) for e in get_all_extensions() if current.lower() in e.lower()][:25]
 
-    @app_commands.command(name="cogs", description="Walks through Source to load or reload all cogs and packages")
+    @app_commands.command(name="cogs", description="Load or reload every extension under Source")
     async def cogs(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=False)
-        
-        reloaded_cogs = []
-        loaded_cogs = []
-        not_found = []
-        failed = []
-
-        all_extensions = get_all_extensions()
-
-        for ext_path in all_extensions:
+        groups = {"Reloaded": [], "Loaded": [], "Not found": [], "Failed": []}
+        extensions = get_all_extensions()
+        for ext in extensions:
             try:
-                await self.bot.reload_extension(ext_path)
-                reloaded_cogs.append(ext_path)
+                await self.bot.reload_extension(ext)
+                groups["Reloaded"].append(ext)
             except commands.ExtensionNotLoaded:
                 try:
-                    await self.bot.load_extension(ext_path)
-                    loaded_cogs.append(ext_path)
+                    await self.bot.load_extension(ext)
+                    groups["Loaded"].append(ext)
                 except commands.ExtensionNotFound:
-                    not_found.append(ext_path)
-                except commands.ExtensionFailed:
-                    failed.append(ext_path)
+                    groups["Not found"].append(ext)
+                except commands.ExtensionFailed as e:
+                    log.error("Extension %s failed to load", ext, exc_info=e.original)
+                    groups["Failed"].append(ext)
             except commands.ExtensionNotFound:
-                not_found.append(ext_path)
-            except commands.ExtensionFailed:
-                failed.append(ext_path)
+                groups["Not found"].append(ext)
+            except commands.ExtensionFailed as e:
+                log.error("Extension %s failed to reload", ext, exc_info=e.original)
+                groups["Failed"].append(ext)
 
-        display_elements = [discord.ui.TextDisplay(content="# ⚙️ Cogs & Packages Setup")]
-        
-        if reloaded_cogs:
-            display_elements.extend([
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content="### 🔄 Reloaded"),
-                discord.ui.TextDisplay(content=", ".join([f"`{c}`" for c in reloaded_cogs]))
-            ])
-            
-        if loaded_cogs:
-            display_elements.extend([
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content="### ✅ Loaded"),
-                discord.ui.TextDisplay(content=", ".join([f"`{c}`" for c in loaded_cogs]))
-            ])
-            
-        if not_found:
-            display_elements.extend([
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content="### ❓ Not Found"),
-                discord.ui.TextDisplay(content=", ".join([f"`{c}`" for c in not_found]))
-            ])
-            
-        if failed:
-            display_elements.extend([
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(content="### ❌ Failed to Load"),
-                discord.ui.TextDisplay(content=", ".join([f"`{c}`" for c in failed]))
-            ])
-
-        color = discord.Colour.red() if failed else discord.Colour.green()
-        result_layout = discord.ui.LayoutView()
-        container = discord.ui.Container(
-            *display_elements,
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-            discord.ui.TextDisplay(content=f"-# Processed a total of {len(all_extensions)} modules/packages."),
-            accent_colour=color
-        )
-        
-        result_layout.add_item(container)
-        await interaction.followup.send(view=result_layout)
+        items: List[discord.ui.Item] = [discord.ui.TextDisplay("### Extensions")]
+        for label, names in groups.items():
+            if names:
+                items.append(discord.ui.TextDisplay(f"**{label}:** {_names(names)}"))
+        items.append(discord.ui.TextDisplay(f"-# {len(extensions)} extensions processed. Failures are in the log."))
+        view = discord.ui.LayoutView()
+        view.add_item(discord.ui.Container(*items, accent_colour=Theme.ERROR if groups["Failed"] else Theme.BRAND))
+        await interaction.followup.send(view=view)
 
 
-async def setup(bot) -> None:
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(OwnerCog(bot))

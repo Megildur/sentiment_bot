@@ -1,6 +1,6 @@
 """Roll messages as text: drawing them, and reading them back when a button is pressed.
 
-A roll's dice live only in its message, so Set swing and Apply support die read them back from the text with parse_roll. Change a line format only together with its pattern here, and keep the old format readable: messages already posted in Discord still use it. scratch/test_rolls.py checks both directions and the formats older versions posted.
+A roll's dice live only in its message, so Set swing and Apply support die read them back from the text with parse_roll. Change a line format only together with its pattern here, and keep the old format readable: messages already posted in Discord still use it.
 """
 import re
 from dataclasses import dataclass, field, replace

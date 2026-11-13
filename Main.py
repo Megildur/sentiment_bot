@@ -1,3 +1,7 @@
+"""Starts Sentiment: reads the token from .env, sets up logging, and loads the core extensions and every package in Source/Cogs.
+
+Run it with `python Main.py` (or `start.ps1`, which updates the code and dependencies first).
+"""
 import logging
 import os
 import sys
@@ -9,8 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Members: color roles and the player counts in the status need the member list.
-# Message content: the owner's `!b quicksync` prefix command. Presences aren't used.
+# Members: color roles and the player counts in the status need the member list. Message content: the owner's `!b quicksync` prefix command. Presences aren't used.
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True

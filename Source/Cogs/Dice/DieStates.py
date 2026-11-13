@@ -65,8 +65,7 @@ class SupportDieModal(DiceModal, title="Send a Support die"):
         view.add_item(discord.ui.Container(
             discord.ui.TextDisplay(
                 "## 🤝 Support die sent\n"
-                f"<@{interaction.user.id}> (*{sender_display}*) sent their {color_emoji(color)} **{color}** (*{name}*) die "
-                f"to support <@{self.target.id}> (*{target_display}*).\n\n"
+                f"<@{interaction.user.id}> (*{sender_display}*) sent their {color_emoji(color)} **{color}** (*{name}*) die to support <@{self.target.id}> (*{target_display}*).\n\n"
                 f"• {target_display} gets an extra 1d6 on their next Roll to Dye or Roll to Do.\n"
                 f"• Once it's used, the die goes back to {sender_display} Locked.\n"
                 f"-# While they hold it, they're also Dyed {color}."

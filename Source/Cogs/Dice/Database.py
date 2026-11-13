@@ -1,8 +1,6 @@
 """Every read and write of Sentiment's data: SQLite at Data/Dice.db through aiosqlite.
 
-Nothing else touches the database file or `self.db`. Table and column names are
-fixed (including the misspelled `recieve_support_*` columns): existing servers'
-data lives in them, so new data goes in new columns or tables only.
+Nothing else touches the database file or `self.db`. Table and column names are fixed (including the misspelled `recieve_support_*` columns): existing servers' data lives in them, so new data goes in new columns or tables only.
 """
 import asyncio
 import os
@@ -53,8 +51,7 @@ class DiceDatabase:
         self.db_lock = asyncio.Lock()
 
     async def connect(self) -> None:
-        # A local file: opening it and creating tables takes milliseconds, so this
-        # is the one place cog_load may touch storage.
+        # A local file: opening it and creating tables takes milliseconds, so this is the one place cog_load may touch storage.
         dir_name = os.path.dirname(self.db_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
@@ -73,8 +70,7 @@ class DiceDatabase:
         await self.db.execute("CREATE TABLE IF NOT EXISTS attributes_names (user_id INTEGER, char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (user_id, attribute, char_name))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS support_die (share_support_user_id INTEGER, recieve_support_user_id INTEGER, share_support_char_name TEXT, recieve_support_char_name TEXT, attribute TEXT, attribute_name TEXT, PRIMARY KEY (share_support_user_id, recieve_support_user_id, share_support_char_name, recieve_support_char_name, attribute))")
         await self.db.execute("CREATE TABLE IF NOT EXISTS selected_char (user_id INTEGER PRIMARY KEY, char_name TEXT)")
-        # Sentiment used to have one GM for every server; that row is kept, and only read once
-        # to give that GM the servers they share with Sentiment (see Dice._move_gm_to_servers).
+        # Sentiment used to have one GM for every server; that row is kept, and only read once to give that GM the servers they share with Sentiment (see Dice._move_gm_to_servers).
         await self.db.execute("CREATE TABLE IF NOT EXISTS gm (value INTEGER PRIMARY KEY CHECK (value = 1), user_id INTEGER)")
         await self.db.execute("CREATE TABLE IF NOT EXISTS guild_gm (guild_id INTEGER PRIMARY KEY, user_id INTEGER)")
         await self.db.execute("CREATE TABLE IF NOT EXISTS npc (value INTEGER CHECK (value = 1), char_name TEXT, PRIMARY KEY (value, char_name))")
@@ -352,8 +348,7 @@ class DiceDatabase:
         return await self.adjust_max_hp(user_id, char_name, max(1, int(target_max)) - old_max)
 
     async def recover_hp(self, user_id: int, char_name: str, roll_total: int, has_unwounded_dice: bool) -> Tuple[int, int, int]:
-        # The rulebook, for a Rest and a Wound alike: the total is your new HP, up to Max HP.
-        # With every Attribute Wounded you only get 1 HP back.
+        # The rulebook, for a Rest and a Wound alike: the total is your new HP, up to Max HP. With every Attribute Wounded you only get 1 HP back.
         old_hp, max_hp = await self.get_hp(user_id, char_name)
         if not has_unwounded_dice:
             new_hp = min(max_hp, old_hp + 1)

@@ -1,22 +1,16 @@
 """Buttons and menus on messages that keep working forever, across restarts.
 
-Every control on a lasting message is a DynamicItem whose template is its exact
-custom_id. discord.py builds a fresh item from the message for every press, so:
-- nothing is kept in memory per message (a view with timeout=None used to stay
-  in memory until the next restart, for every message ever sent);
+Every control on a lasting message is a DynamicItem whose template is its exact custom_id. discord.py builds a fresh item from the message for every press, so:
+- nothing is kept in memory per message (a view with timeout=None stays in memory until the next restart, for every message ever sent);
 - a press after a restart runs the same code as one before it;
-- two messages never share state. A view registered with bot.add_view is one
-  object for every message, and Sentiment's used to carry one player's roll or
-  server into the next press.
+- two messages never share state. A view registered with bot.add_view is one object for every message, so it would carry one player's roll or server into the next press.
 
-Three rules keep them registered (discord.py drops a DynamicItem class for every
-message when a view holding one times out or is stopped):
+Three rules keep them registered (discord.py drops a DynamicItem class for every message when a view holding one times out or is stopped):
 - never send them in a private reply (discord.py gives those a 15-minute timeout);
 - never give their view a timeout or call stop() on it;
 - build a fresh view for every send or edit, never edit with one already sent.
 
-The state a press needs comes from the message (who ran the command, its text,
-the options picked) and the database, never from memory.
+The state a press needs comes from the message (who ran the command, its text, the options picked) and the database, never from memory.
 """
 import logging
 from typing import Any, ClassVar, Optional
@@ -87,8 +81,7 @@ async def disable_message_controls(message: discord.Message) -> None:
 class LastingItem:
     """Shared behavior for every control on a lasting message.
 
-    Subclass it together with discord.ui.DynamicItem, with the exact custom_id as
-    the template, and register the class with bot.add_dynamic_items in cog_load:
+    Subclass it together with discord.ui.DynamicItem, with the exact custom_id as the template, and register the class with bot.add_dynamic_items in cog_load:
 
         class Close(LastingItem, discord.ui.DynamicItem[discord.ui.Button], template=r"close_menu_button"):
             def __init__(self):
@@ -96,10 +89,7 @@ class LastingItem:
 
             async def run(self, interaction): ...
 
-    Who may press: everyone when `owner_only` is False, otherwise the person who
-    ran the command (override `allowed` to let others in). Errors become a private
-    notice; discord.py would otherwise drop them and Discord would say
-    "This interaction failed".
+    Who may press: everyone when `owner_only` is False, otherwise the person who ran the command (override `allowed` to let others in). Errors become a private notice; discord.py would otherwise drop them and Discord would say "This interaction failed".
     """
 
     owner_only: ClassVar[bool] = True

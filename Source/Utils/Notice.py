@@ -54,9 +54,7 @@ async def notify(
 async def send_deferred_error(interaction: discord.Interaction, view: discord.ui.LayoutView) -> bool:
     """A private notice after a public defer() of a slash command.
 
-    The first follow-up after a public defer replaces the "thinking" message and
-    can't be private, so the error would be posted for everyone. Deleting the
-    placeholder first lets the follow-up be private.
+    The first follow-up after a public defer replaces the "thinking" message and can't be private, so the error would be posted for everyone. Deleting the placeholder first lets the follow-up be private.
     """
     try:
         await interaction.delete_original_response()

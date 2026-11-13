@@ -1,7 +1,6 @@
 """Roll messages (/roll_to_dye, /roll_to_do, /roll_to_recover) and their buttons.
 
-A roll's dice are read back from its own text (RollText.parse_roll), so a press
-works the same before and after a restart.
+A roll's dice are read back from its own text (RollText.parse_roll), so a press works the same before and after a restart.
 """
 import logging
 import random
@@ -61,8 +60,7 @@ class RollPress(NamedTuple):
 async def roll_press(interaction: discord.Interaction) -> Optional[RollPress]:
     """Read the pressed roll, or explain why it can't change and return None.
 
-    A roll only changes while its character is still the player's active one;
-    otherwise its buttons are greyed out.
+    A roll only changes while its character is still the player's active one; otherwise its buttons are greyed out.
     """
     db = dice_db(interaction)
     message = interaction.message

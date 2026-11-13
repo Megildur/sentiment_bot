@@ -1,7 +1,6 @@
 """Swing color roles: a player's name shows their active character's swing color.
 
-Every function takes the real, cached server (`Permissions.server_of(interaction)`),
-not `interaction.guild`, whose stand-in `me` has no roles.
+Every function takes the real, cached server (`Permissions.server_of(interaction)`), not `interaction.guild`, whose stand-in `me` has no roles.
 """
 import logging
 from typing import Any, Dict, List, Optional, Set
@@ -157,8 +156,7 @@ async def auto_setup_all_color_roles(guild: discord.Guild, db) -> Dict[str, Opti
 
 
 async def sync_all_server_members(guild: discord.Guild, db) -> Dict[str, int]:
-    """Sync every player in this server. Members come from the cache: with the members
-    intent it holds the whole server, so players elsewhere cost no API calls."""
+    """Sync every player in this server. Members come from the cache: with the members intent it holds the whole server, so players elsewhere cost no API calls."""
     stats = {"synced": 0, "colorless": 0}
     for user_id, char_name in await db.get_selected_chars():
         if guild.get_member(user_id) is None:

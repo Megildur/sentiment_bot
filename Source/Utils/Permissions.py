@@ -1,9 +1,7 @@
 """Permission checks shared by every command, panel and form.
 
-Sentiment's own permissions (never read guild.me or permissions_for yourself;
-scratch/test_permissions.py fails if you do):
-- `server_of(interaction)` for the real, cached server. `interaction.guild` can be a
-  stand-in whose `me` has no roles, which made role checks fail before v1.0.1.
+Sentiment's own permissions (never read guild.me or permissions_for yourself):
+- `server_of(interaction)` for the real, cached server. `interaction.guild` can be a stand-in whose `me` has no roles, so role checks fail on it.
 - `missing_server_permissions(guild, ...)` for server-wide ones like Manage Roles.
 - `role_problem(guild, role)` before giving out or saving a role.
 
@@ -83,8 +81,7 @@ async def require_member_permissions(
 ) -> bool:
     """For staff commands: True if the member may run it, else a private notice and False.
 
-    `to` finishes the sentence "You need Manage Server to ...". `or_also` names another
-    way in that the caller already ruled out, such as "be the GM".
+    `to` finishes the sentence "You need Manage Server to ...". `or_also` names another way in that the caller already ruled out, such as "be the GM".
     """
     if member_has(interaction.user, *perms, any_of=any_of):
         return True

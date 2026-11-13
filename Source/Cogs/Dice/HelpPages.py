@@ -1,8 +1,6 @@
 """/help: the guide to Sentiment's commands and rules, one page at a time.
 
-Anyone can turn the pages, and they keep working after a restart: the page
-number is read from the message's "Page X/Y" label. What the pages say about
-the game follows the Sentiment 0.9 rulebook.
+Anyone can turn the pages, and they keep working after a restart: the page number is read from the message's "Page X/Y" label. What the pages say about the game follows the Sentiment 0.9 rulebook.
 """
 import re
 from typing import List, Tuple
@@ -16,9 +14,7 @@ from .Common import lasting_view, row, separator
 PAGES: List[Tuple[str, str]] = [
     (
         "## 📜 Characters",
-        "A new character has three Attributes (three differently colored d6), **10 HP** and **6 Speed**. "
-        "Each Attribute has a title you choose, like Red *Passion* or Blue *Focus*, and a bonus "
-        "(its Attribute Level) from +0 to +9.\n\n"
+        "A new character has three Attributes (three differently colored d6), **10 HP** and **6 Speed**. Each Attribute has a title you choose, like Red *Passion* or Blue *Focus*, and a bonus (its Attribute Level) from +0 to +9.\n\n"
         "**`/set_attributes`**\n"
         "• Create a character, or open your active character's setup.\n"
         "• Add, edit, title or delete Attributes. Switch your active character, or delete one.\n\n"
@@ -32,13 +28,11 @@ PAGES: List[Tuple[str, str]] = [
         "## 🎲 Core rolls",
         "**`/roll_to_dye`**: when something happens to you\n"
         "• Rolls every Attribute die that isn't Wounded, Locked or sent as Support. Beat what triggered it to succeed.\n"
-        "• **Set Swing** makes one rolled die your Swing: its result plus its bonus. While it's your Swing you're "
-        "Dyed its Color, and it isn't rerolled: later Rolls to Dye add its saved result plus its bonus.\n"
+        "• **Set Swing** makes one rolled die your Swing: its result plus its bonus. While it's your Swing you're Dyed its Color, and it isn't rerolled: later Rolls to Dye add its saved result plus its bonus.\n"
         "• Rolling to Dye just to see where your character's head is (a Roll to Reflect) works the same way.\n\n"
         "**`/roll_to_do`**: when you act on the world\n"
         "• **1d20 + your Swing**. With no Swing, **1d20 + 1d6**: a Wild roll, Dyed no Color.\n"
-        "• Beat the target's Roll to Dye; a tie goes to the one who Rolled to Dye. A hit deals damage equal to your "
-        "Swing (or the d6 when Wild).\n"
+        "• Beat the target's Roll to Dye; a tie goes to the one who Rolled to Dye. A hit deals damage equal to your Swing (or the d6 when Wild).\n"
         "• A 20 on the d20 is a **Critical**: damage, or the effect, doubles.\n\n"
         "**`/roll_to_recover`**: after a Rest, or when you take a Wound\n"
         "• Unlocks all your dice, then rolls your Unwounded dice and adds all their bonuses.\n"
@@ -66,8 +60,7 @@ PAGES: List[Tuple[str, str]] = [
         "## 🔒 Dice states and Support",
         "**`/lock_die`** and **`/unlock_die`**\n"
         "• Lock any Attribute die to **Sprint** (move your Speed again) or **Tag a Prop** (use the scenery, usually +1d6).\n"
-        "• Lock your Swing die to **Ignite** it: the Swing is spent, for a **Push** (+1d6 to a roll), a **Block** "
-        "(take 1d6 less damage) or a **Multiply** (up to two more targets, rolled Wild).\n"
+        "• Lock your Swing die to **Ignite** it: the Swing is spent, for a **Push** (+1d6 to a roll), a **Block** (take 1d6 less damage) or a **Multiply** (up to two more targets, rolled Wild).\n"
         "• Locked dice come back at the end of the Scene, at the start of your Turn in a Conflict, or with `/roll_to_recover`.\n\n"
         "**`/wound_die`** and **`/unwound_die`**\n"
         "• A Wound takes an Attribute out of play and Unlocks every Locked die. Any Attribute can be Wounded, even a Locked one.\n"
@@ -75,8 +68,7 @@ PAGES: List[Tuple[str, str]] = [
         "**`/drop_swing`**\n"
         "• Drop your Swing and become colorless. Your Swing color role is removed.\n\n"
         "**`/support`**\n"
-        "• Send an ally one of your dice. They're Dyed its Color too, and get **Apply Support die (+1d6)** on their next roll. "
-        "The die comes back to you Locked.",
+        "• Send an ally one of your dice. They're Dyed its Color too, and get **Apply Support die (+1d6)** on their next roll. The die comes back to you Locked.",
     ),
     (
         "## 🎨 Swing color roles",
@@ -99,13 +91,11 @@ PAGES: List[Tuple[str, str]] = [
         "## ⚖️ GM, Scenes and Conflicts",
         "**`/set_gm`**\n"
         "• Choose this server's GM. Members with Manage Server, and the server's current GM, can do this.\n"
-        "• The GM can mark characters as **NPCs** in `/set_attributes`, and use any player's rolls and character panels "
-        "in their server.\n\n"
+        "• The GM can mark characters as **NPCs** in `/set_attributes`, and use any player's rolls and character panels in their server.\n\n"
         "**Target numbers** (beat it to succeed)\n"
         "Very Easy 5 · Easy 10 · Normal 15 · Hard 20 · Very Hard 25 · Extreme 30\n\n"
         "**Clash**\n"
-        "• Rolling to Do at someone Dyed your Color is a Clash: they Roll to Do instead of to Dye. If the attacker wins, "
-        "damage doubles; if the defender wins, they act at once.\n\n"
+        "• Rolling to Do at someone Dyed your Color is a Clash: they Roll to Do instead of to Dye. If the attacker wins, damage doubles; if the defender wins, they act at once.\n\n"
         "**Conflicts**\n"
         "• Everyone Rolls to Dye for Initiative. Each Turn has 1 Action and 1 Move; Lock dice to Sprint for more Moves.\n"
         "• At the end of each Act, everyone Keeps their Swing or Rerolls it with a new Roll to Dye.",
@@ -139,8 +129,7 @@ class HelpPageButton(LastingItem, discord.ui.DynamicItem[discord.ui.Button], tem
 
     @classmethod
     def wrap(cls, button: discord.ui.Button) -> "HelpPageButton":
-        # The page label is a disabled button; it's wrapped too, so the message holds
-        # no control discord.py would keep in memory.
+        # The page label is a disabled button; it's wrapped too, so the message holds no control discord.py would keep in memory.
         self = cls.__new__(cls)
         discord.ui.DynamicItem.__init__(self, button)
         return self

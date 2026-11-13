@@ -1,9 +1,6 @@
 """/color_roles: the public panel for a server's swing color roles.
 
-Anyone can sync their own role from it. Setting roles up, picking or resetting
-a color's role, and syncing everyone take Manage Roles, or being the server's GM.
-The color being edited is read from the message's color menu, so two servers'
-panels never mix.
+Anyone can sync their own role from it. Setting roles up, picking or resetting a color's role, and syncing everyone take Manage Roles, or being the server's GM. The color being edited is read from the message's color menu, so two servers' panels never mix.
 """
 from typing import Dict, List, Optional
 
@@ -58,8 +55,7 @@ async def color_roles_panel(guild: discord.Guild, db, selected: str = "Red", not
         separator(),
         discord.ui.TextDisplay(
             f"{status}\n"
-            "-# Discord colors a name with the member's highest colored role. Keep these roles at the top, "
-            "just under Sentiment's role, and other colored roles below them."
+            "-# Discord colors a name with the member's highest colored role. Keep these roles at the top, just under Sentiment's role, and other colored roles below them."
         ),
         separator(large=True),
         section("**Set up roles:** finds or creates all 10, then syncs every player.", AutoSetupButton()),

@@ -1,8 +1,6 @@
 """Fire-and-forget tasks a cog starts, such as refreshing a player's other messages.
 
-asyncio keeps only a weak reference to a task, so one that nobody holds can be
-garbage-collected mid-run. Background holds each task until it finishes, and
-cancels whatever is still running when the cog unloads:
+asyncio keeps only a weak reference to a task, so one that nobody holds can be garbage-collected mid-run. Background holds each task until it finishes, and cancels whatever is still running when the cog unloads:
 
     self.background = Background()          # in __init__
     self.background.spawn(coro)

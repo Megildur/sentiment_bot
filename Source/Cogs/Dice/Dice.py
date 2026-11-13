@@ -47,9 +47,7 @@ class Dice(commands.Cog):
     async def _move_gm_to_servers(self) -> None:
         """Make the old one-for-every-server GM the GM of each server they share with Sentiment.
 
-        Runs once, after the update that made GMs per server: as soon as any server has
-        its own GM, the old row is ignored. Waits for the server list, so it never holds
-        up loading.
+        Runs once, after the update that made GMs per server: as soon as any server has its own GM, the old row is ignored. Waits for the server list, so it never holds up loading.
         """
         await self.bot.wait_until_ready()
         legacy = await self.db.get_legacy_gm()

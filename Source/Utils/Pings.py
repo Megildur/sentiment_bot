@@ -1,10 +1,6 @@
 """Pinging people from Components v2 messages.
 
-Discord notifies a mention only when a message is created; edits never ping.
-So a ping belongs in a new message, never in an edit (and that includes the
-first follow-up after a "thinking" defer, which edits the loading message).
-In a v2 message the mention also gets its own text line above the container,
-so every client treats it as a ping even when the container names the person too.
+Discord notifies a mention only when a message is created; edits never ping. So a ping belongs in a new message, never in an edit (and that includes the first follow-up after a "thinking" defer, which edits the loading message). In a v2 message the mention also gets its own text line above the container, so every client treats it as a ping even when the container names the person too.
 """
 from typing import Iterable, List, Optional
 

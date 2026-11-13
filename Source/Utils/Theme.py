@@ -6,9 +6,7 @@
     MUTED   ended, deleted or disabled states
     ERROR   errors, refusals and delete confirmations only
 
-A character's swing color is content, not decoration: anything about a
-character (rolls, cards, HP) uses its swing's color from Constants, and no
-accent at all while the character is colorless.
+A character's swing color is content, not decoration: anything about a character (rolls, cards, HP) uses its swing's color from Constants, and no accent at all while the character is colorless.
 """
 
 import discord

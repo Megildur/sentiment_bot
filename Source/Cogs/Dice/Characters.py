@@ -1,8 +1,6 @@
 """Character panels: /set_attributes, /character_card and /hp max, and the forms they open.
 
-Every button and menu here is a DiceItem (see Source/Utils/Views.py): it works on
-the player the message belongs to and their active character, read fresh from
-the database on every press.
+Every button and menu here is a DiceItem (see Source/Utils/Views.py): it works on the player the message belongs to and their active character, read fresh from the database on every press.
 """
 import logging
 import random
@@ -110,9 +108,7 @@ def create_character_view() -> discord.ui.LayoutView:
     return lasting_view(
         discord.ui.TextDisplay(
             "## 🎭 Create a character\n"
-            "You don't have a character yet. Press **Create character**, enter a name and check up to three colors "
-            "(most characters start with three Attributes), then pick each one's bonus in the same order, top to bottom. "
-            "New characters start at 10 / 10 HP."
+            "You don't have a character yet. Press **Create character**, enter a name and check up to three colors (most characters start with three Attributes), then pick each one's bonus in the same order, top to bottom. New characters start at 10 / 10 HP."
         ),
         separator(large=True),
         row(CreateCharacterButton(), CloseMenuButton()),
@@ -193,8 +189,8 @@ async def character_card(db, user_id: int, char_name: str) -> discord.ui.LayoutV
         discord.ui.TextDisplay(
             f"**Swing:** {swing_text}\n\n"
             f"**Attributes**\n" + ("\n".join(attribute_lines) or "-# No Attributes yet.") + "\n\n"
-            f"**Locked:** {dice_list(state.locked)}\n"
-            f"**Wounded:** {dice_list(state.wounded)}"
+                f"**Locked:** {dice_list(state.locked)}\n"
+                f"**Wounded:** {dice_list(state.wounded)}"
         ),
         separator(large=True),
         discord.ui.TextDisplay("**Switch active character**"),
@@ -261,8 +257,7 @@ def hp_result_view(
                 "### 0 HP: you take a Wound",
                 "1. Run `/roll_to_recover`. It Unlocks all your dice and rolls them for your new HP.",
                 "2. Run `/wound_die` to Wound one Attribute.",
-                "-# You may also Leave the Scene (flee or pass out). You still take the Wound and Roll to Recover, "
-                "but take no more damage in this Scene or Conflict.",
+                "-# You may also Leave the Scene (flee or pass out). You still take the Wound and Roll to Recover, but take no more damage in this Scene or Conflict.",
             ]
     view = discord.ui.LayoutView()
     view.add_item(discord.ui.Container(discord.ui.TextDisplay("\n".join(lines)), accent_colour=swing_accent(swing)))
@@ -296,8 +291,7 @@ async def _panel_for(
 async def refresh_tracked_messages(client: discord.Client, db, user_id: int, char_name: str, exclude_message_id: Optional[int] = None) -> None:
     """Redraw a player's panels and cards for `char_name`, and grey out rolls for any other character.
 
-    Rolls for `char_name` itself are skipped before fetching anything, so a player's
-    hundredth roll doesn't cost a hundred API calls on every HP change.
+    Rolls for `char_name` itself are skipped before fetching anything, so a player's hundredth roll doesn't cost a hundred API calls on every HP change.
     """
     for channel_id, message_id, view_type, tracked_char in await db.get_user_active_views(user_id):
         if message_id == exclude_message_id:
@@ -799,10 +793,7 @@ class RollHPButton(DiceItem, discord.ui.DynamicItem[discord.ui.Button], template
         gained = max(0, die + mod)
         old_cur, old_max, new_cur, new_max = await db.adjust_max_hp(owner, char_name, gained)
         mod_text = f" {'+' if mod > 0 else '-'} {abs(mod)}" if mod else ""
-        note = (
-            f"**Spent 1 Potential: rolled 1d6 ({die}){mod_text} = +{gained} Max HP.** "
-            f"HP `{old_cur} / {old_max}` ➔ `{new_cur} / {new_max}`."
-        )
+        note = f"**Spent 1 Potential: rolled 1d6 ({die}){mod_text} = +{gained} Max HP.** HP `{old_cur} / {old_max}` ➔ `{new_cur} / {new_max}`."
         await show(interaction, await max_hp_panel(db, owner, char_name, note), MAX_HP, owner, char_name, changed=True)
 
 

@@ -172,6 +172,21 @@ Server role order
    ```
 6. Sync the slash commands from a server in `ALLOWED_GUILDS` with `!b quicksync`, or `/owner sync sync_type:Guild`.
 
+---
+
+## Working on the code
+
+A few rules keep the bot's saved data, posted messages and buttons working across updates:
+
+- **Fixed names.** Never rename a slash command, option, choice value, `custom_id`, table or column (the misspelled `recieve_support_*` columns included). Servers, old messages and saved data refer to them. Add columns or tables, never drop data. Descriptions and wording can change.
+- **One place for data.** Everything lives in SQLite through `DiceDatabase` (`Source/Cogs/Dice/Database.py`). Don't keep game state in memory: a button press reads what it needs from the message and the database.
+- **Lasting buttons.** Every button and menu is a `DynamicItem` built on `LastingItem` or `DiceItem` (`Source/Utils/Views.py`), so it keeps working after restarts. Build a fresh view for every send or edit.
+- **Reuse the helpers** in `Source/Utils` (notices, permissions, pings, colors) and `Source/Cogs/Dice/Common.py` before writing new ones.
+- **Components v2 only.** Replies are `LayoutView`s made of `Container`, `TextDisplay` and `Section`, never embeds or plain `content=` text.
+- **Permissions** are checked only through `Source/Utils/Permissions.py`. Refuse with what's missing instead of quietly doing less.
+- **The game** follows the Sentiment 0.9 rulebook. When a command, `/help` or this README describes a mechanic, it must match the rulebook.
+- **Python 3.10+.** No `match`, no `X | Y` unions at runtime, no reused quotes inside f-strings.
+- **Comments** explain why, not what. A description is one comment or one string, however long: don't break it across lines.
 
 ---
 

@@ -354,8 +354,17 @@ def _color_checkboxes(colors: List[str], default: Optional[str] = None) -> List[
     return [discord.CheckboxGroupOption(label=f"{MODAL_COLOR_EMOJIS.get(c, '⚪')} {c}", value=c, default=c == default) for c in colors]
 
 
-def _bonus_options(default: Optional[int] = None) -> List[discord.RadioGroupOption]:
-    return [discord.RadioGroupOption(label=f"Bonus: +{i}", value=str(i), default=i == default) for i in range(10)]
+def _bonus_select(default: Optional[int] = None, required: bool = True) -> discord.ui.Select:
+    """A form's menu of bonuses from +0 to +9, with `default` already picked. An optional menu can be left empty."""
+    options = [discord.SelectOption(label=f"Bonus: +{i}", value=str(i), default=i == default) for i in range(10)]
+    return discord.ui.Select(
+        options=options, min_values=1 if required else 0, max_values=1, required=required, placeholder=None if required else "No bonus (+0)",
+    )
+
+
+def _chosen_bonus(select: discord.ui.Select) -> int:
+    """The bonus picked in a form's menu, +0 when an optional one was left empty."""
+    return int(select.values[0]) if select.values else 0
 
 
 def _attribute_select(attributes: List[Tuple[str, int]], placeholder: str) -> discord.ui.Select:
@@ -372,7 +381,7 @@ class CreateCharacterModal(DiceModal, title="Create a character"):
         self.add_item(discord.ui.Label(text="Colors (up to 3)", component=self.colors))
         self.bonuses = []
         for place in ("1st", "2nd", "3rd"):
-            bonus = discord.ui.RadioGroup(options=_bonus_options(), required=False)
+            bonus = _bonus_select(required=False)
             self.bonuses.append(bonus)
             self.add_item(discord.ui.Label(text=f"Bonus for the {place} checked color", component=bonus))
 
@@ -382,7 +391,7 @@ class CreateCharacterModal(DiceModal, title="Create a character"):
             await notify(interaction, "Name needed", "Give your character a name.")
             return
         # Each bonus belongs to the color in the same place; a skipped one is +0.
-        attributes = [(color, int(bonus.value or 0)) for color, bonus in zip(self.colors.values, self.bonuses)]
+        attributes = [(color, _chosen_bonus(bonus)) for color, bonus in zip(self.colors.values, self.bonuses)]
         db = dice_db(interaction)
         user_id = interaction.user.id
         await db.set_attributes(user_id, char_name, attributes)
@@ -402,11 +411,11 @@ class EditAttributeModal(DiceModal, title="Edit an Attribute"):
         self.user_id, self.char_name, self.old_color = user_id, char_name, old_color
         self.color = discord.ui.CheckboxGroup(options=_color_checkboxes(COLOR_ORDER, old_color), min_values=1, max_values=1)
         self.add_item(discord.ui.Label(text=f"Editing {old_color}", component=self.color))
-        self.bonus = discord.ui.RadioGroup(options=_bonus_options(old_bonus))
+        self.bonus = _bonus_select(old_bonus)
         self.add_item(discord.ui.Label(text="New bonus", component=self.bonus))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await dice_db(interaction).edit_attribute(self.user_id, self.char_name, self.old_color, self.color.values[0], int(self.bonus.value))
+        await dice_db(interaction).edit_attribute(self.user_id, self.char_name, self.old_color, self.color.values[0], _chosen_bonus(self.bonus))
         await show_attributes(interaction, self.user_id, self.char_name)
 
 
@@ -416,11 +425,11 @@ class AddAttributeModal(DiceModal, title="Add an Attribute"):
         self.user_id, self.char_name = user_id, char_name
         self.color = discord.ui.CheckboxGroup(options=_color_checkboxes([c for c in COLOR_ORDER if c not in current_colors]), min_values=1, max_values=1)
         self.add_item(discord.ui.Label(text="Color to add", component=self.color))
-        self.bonus = discord.ui.RadioGroup(options=_bonus_options(0))
+        self.bonus = _bonus_select(0)
         self.add_item(discord.ui.Label(text="Bonus", component=self.bonus))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await dice_db(interaction).add_attribute(self.user_id, self.char_name, self.color.values[0], int(self.bonus.value))
+        await dice_db(interaction).add_attribute(self.user_id, self.char_name, self.color.values[0], _chosen_bonus(self.bonus))
         await show_attributes(interaction, self.user_id, self.char_name)
 
 

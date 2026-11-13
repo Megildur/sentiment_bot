@@ -1,9 +1,11 @@
-"""!b quicksync: the owner's fallback for syncing slash commands when /owner isn't there yet."""
+"""!b quicksync: a fallback for administrators to sync slash commands when /owner isn't there yet."""
 import logging
 import os
 
 import discord
 from discord.ext import commands
+
+from .Utils.Permissions import member_has
 
 log = logging.getLogger(__name__)
 
@@ -13,8 +15,10 @@ class QuickSync(commands.Cog):
         self.bot = bot
 
     @commands.command(name="quicksync", hidden=True)
-    @commands.is_owner()
     async def quicksync(self, ctx: commands.Context) -> None:
+        # A hidden command stays quiet for everyone who may not use it, so it answers only members with the Administrator permission.
+        if not member_has(ctx.author, "administrator"):
+            return
         if ctx.guild is None:
             await ctx.send("Run this in one of the allowed servers.")
             return
